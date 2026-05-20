@@ -1,13 +1,8 @@
 /**
  * Grid-based A* Pathfinding Visualizer
- * Traces out Zachary Zdobinski's professional and academic journey across Pittsburgh, PA
- * on a grid map of Pittsburgh's rivers, bridges, and key landmarks.
- * 
- * Target Points:
- * 1. University of Pittsburgh (BS in EE)
- * 2. Carnegie Mellon University (MS in ECE)
- * 3. Bechtel Plant Machinery (Advanced Data Engineer)
- * 4. Point State Park (The Point - downtown Pittsburgh)
+ * Traces out routes across an actual image map of Pittsburgh, PA.
+ * Uses color-based water detection for obstacles, allowing routing around rivers.
+ * Allows user to click anywhere on the map to set a goal.
  */
 
 class AStarNode {
@@ -31,11 +26,12 @@ class AStarVisualizer {
         this.ctx = canvas.getContext('2d');
         
         // Grid configuration
-        this.cellSize = 12; // Smaller cells for higher resolution map
+        this.cellSize = 12; // cell size in pixels
         this.cols = Math.floor(canvas.width / this.cellSize);
         this.rows = Math.floor(canvas.height / this.cellSize);
         
-        this.searchSpeed = 5; // Nodes expanded per frame
+        this.searchSpeed = 6; // Nodes expanded per frame
+        this.obstacleDensity = 0.22; // For vector fallback only
         
         // State matrices
         this.grid = [];
@@ -43,7 +39,18 @@ class AStarVisualizer {
         this.closedSet = [];
         this.path = [];
         
-        // Pittsburgh Milestones
+        // Map Image properties
+        this.mapImage = new Image();
+        this.mapImage.src = 'pittsburgh_map.png';
+        this.mapLoaded = false;
+        
+        this.mapImage.onload = () => {
+            this.mapLoaded = true;
+            this.generateGridFromImage();
+            this.selectNextCheckpoint();
+        };
+
+        // Pittsburgh Milestones (Fallback & Auto-routing loop)
         this.checkpoints = [
             {
                 name: "University of Pittsburgh",
@@ -53,26 +60,25 @@ class AStarVisualizer {
             },
             {
                 name: "Carnegie Mellon University",
-                desc: "M.S. in ECE (Estimation & ML Systems)",
+                desc: "M.S. in ECE (Estimation & ML)",
                 col: Math.floor(this.cols * 0.82),
                 row: Math.floor(this.rows * 0.28)
             },
             {
                 name: "Bechtel Plant Machinery",
-                desc: "Advanced Data Engineer (Machine Learning)",
+                desc: "Advanced Data Engineer (ML)",
                 col: Math.floor(this.cols * 0.65),
                 row: Math.floor(this.rows * 0.80)
             },
             {
                 name: "Point State Park",
-                desc: "Pittsburgh PA (Dynamic Center)",
+                desc: "Pittsburgh PA (The Point)",
                 col: Math.floor(this.cols * 0.12),
                 row: Math.floor(this.rows * 0.50)
             }
         ];
         
         // Define bridges to cross rivers (open cells)
-        this.bridges = [];
         this.defineBridges();
 
         // Start, Target, and Agent
@@ -81,12 +87,38 @@ class AStarVisualizer {
         this.currentNode = null;
         this.agent = { col: 0, row: 0, x: 0, y: 0, pathIdx: 0, active: false, heading: 0 };
         
+        // Custom goal set by clicking
+        this.customGoal = null;
+        
         // Visualizer phases: 'INIT', 'SEARCHING', 'PATH_FOUND', 'DRIVING'
         this.phase = 'INIT';
         this.checkpointIndex = 0;
         
-        this.generateGrid();
+        // Set up click listener on canvas
+        this.setupClickListener();
+
+        // Initialize fallback grid
+        this.generateFallbackGrid();
         this.selectNextCheckpoint();
+    }
+
+    /**
+     * Set up click handler to allow routing to any spot
+     */
+    setupClickListener() {
+        // Remove existing listener if any, and bind
+        this.canvas.removeEventListener('click', this.canvasClickHandler);
+        this.canvasClickHandler = (event) => {
+            // Only capture clicks if A* is the active tab
+            const activeTab = document.querySelector('.ctrl-tab-btn.active');
+            if (activeTab && activeTab.id === 'btn-astar') {
+                const rect = this.canvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+                this.setGoalAt(x, y);
+            }
+        };
+        this.canvas.addEventListener('click', this.canvasClickHandler);
     }
 
     /**
@@ -114,48 +146,41 @@ class AStarVisualizer {
     }
 
     /**
-     * Helper to determine if a cell falls within Pittsburgh's three rivers
+     * Analyze image pixels to determine where water obstacles are
      */
-    isInRiver(c, r) {
-        let c_rel = c / this.cols;
-        let r_rel = r / this.rows;
+    generateGridFromImage() {
+        const offscreen = document.createElement('canvas');
+        offscreen.width = this.canvas.width;
+        offscreen.height = this.canvas.height;
+        const oCtx = offscreen.getContext('2d');
+        oCtx.drawImage(this.mapImage, 0, 0, offscreen.width, offscreen.height);
 
-        // 1. Ohio River (Left side of Point)
-        if (c_rel <= 0.12) {
-            return Math.abs(r_rel - 0.50) < 0.08;
-        }
-
-        // 2. Allegheny River (Flows from Top-Right to Point at 0.12, 0.50)
-        // Centerline equation: y_rel = 0.50 - (c_rel - 0.12) * (0.50 - 0.05) / (1.0 - 0.12)
-        let alleghenyCenter = 0.50 - (c_rel - 0.12) * 0.48;
-        if (r_rel < 0.50 && Math.abs(r_rel - alleghenyCenter) < 0.06) {
-            return true;
-        }
-
-        // 3. Monongahela River (Flows from Bottom-Right to Point at 0.12, 0.50)
-        // Centerline equation: y_rel = 0.50 + (c_rel - 0.12) * (0.85 - 0.50) / (1.0 - 0.12)
-        let monongahelaCenter = 0.50 + (c_rel - 0.12) * 0.42;
-        if (r_rel > 0.46 && Math.abs(r_rel - monongahelaCenter) < 0.06) {
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * Generate the map grid: Rivers are obstacles, Bridges are open gates
-     */
-    generateGrid() {
         this.grid = [];
         for (let c = 0; c < this.cols; c++) {
             this.grid[c] = [];
             for (let r = 0; r < this.rows; r++) {
-                let isRiver = this.isInRiver(c, r);
-                this.grid[c][r] = isRiver ? 1 : 0;
+                // Sample center of grid cell
+                let sampleX = Math.floor(c * this.cellSize + this.cellSize / 2);
+                let sampleY = Math.floor(r * this.cellSize + this.cellSize / 2);
+                
+                // Get pixel color
+                let imgData = oCtx.getImageData(sampleX, sampleY, 1, 1).data;
+                let red = imgData[0];
+                let green = imgData[1];
+                let blue = imgData[2];
+
+                // Detect water: In stylized maps, water is blue-ish/cyan-ish.
+                // We test if blue is higher than red and green, or if the color matches a soft blue palette.
+                let isWater = (blue > red + 10) && (blue > green - 10) && (red < 210 || blue > 200);
+                
+                // Keep border columns passable
+                let isBorder = c === 0 || r === 0 || c === this.cols - 1 || r === this.rows - 1;
+                
+                this.grid[c][r] = (isWater && !isBorder) ? 1 : 0;
             }
         }
 
-        // Apply bridge openings
+        // Apply bridge openings to make sure they are traversable
         this.bridges.forEach(bridge => {
             let startRow = Math.floor(bridge.rowRange[0] * this.rows);
             let endRow = Math.floor(bridge.rowRange[1] * this.rows);
@@ -169,17 +194,101 @@ class AStarVisualizer {
             }
         });
 
-        // Ensure checkpoints themselves are open
+        // Clear obstacles around checkpoints
         this.checkpoints.forEach(cp => {
             this.clearObstaclesAround(cp.col, cp.row, 1);
         });
     }
 
     /**
-     * Select the next milestone destination along Zachary's career path
+     * Fallback mathematical rivers if image fails to load
+     */
+    isInRiver(c, r) {
+        let c_rel = c / this.cols;
+        let r_rel = r / this.rows;
+        if (c_rel <= 0.12) {
+            return Math.abs(r_rel - 0.50) < 0.08;
+        }
+        let alleghenyCenter = 0.50 - (c_rel - 0.12) * 0.48;
+        if (r_rel < 0.50 && Math.abs(r_rel - alleghenyCenter) < 0.06) {
+            return true;
+        }
+        let monongahelaCenter = 0.50 + (c_rel - 0.12) * 0.42;
+        if (r_rel > 0.46 && Math.abs(r_rel - monongahelaCenter) < 0.06) {
+            return true;
+        }
+        return false;
+    }
+
+    generateFallbackGrid() {
+        this.grid = [];
+        for (let c = 0; c < this.cols; c++) {
+            this.grid[c] = [];
+            for (let r = 0; r < this.rows; r++) {
+                let isRiver = this.isInRiver(c, r);
+                this.grid[c][r] = isRiver ? 1 : 0;
+            }
+        }
+
+        this.bridges.forEach(bridge => {
+            let startRow = Math.floor(bridge.rowRange[0] * this.rows);
+            let endRow = Math.floor(bridge.rowRange[1] * this.rows);
+            let col = bridge.col;
+            if (col >= 0 && col < this.cols) {
+                for (let r = startRow; r <= endRow; r++) {
+                    if (r >= 0 && r < this.rows) {
+                        this.grid[col][r] = 0;
+                    }
+                }
+            }
+        });
+
+        this.checkpoints.forEach(cp => {
+            this.clearObstaclesAround(cp.col, cp.row, 1);
+        });
+    }
+
+    /**
+     * Route user directly to clicked spot
+     */
+    setGoalAt(x, y) {
+        let gCol = Math.floor(x / this.cellSize);
+        let gRow = Math.floor(y / this.cellSize);
+        
+        gCol = Math.max(1, Math.min(this.cols - 2, gCol));
+        gRow = Math.max(1, Math.min(this.rows - 2, gRow));
+        
+        // Clear obstacle at endpoint if clicked on water
+        this.grid[gCol][gRow] = 0;
+        this.clearObstaclesAround(gCol, gRow, 1);
+
+        this.customGoal = {
+            name: "Custom Goal",
+            desc: "User Clicked Target",
+            col: gCol,
+            row: gRow
+        };
+
+        // Start planning path from current agent position
+        this.startNode = new AStarNode(this.agent.col, this.agent.row);
+        this.targetNode = new AStarNode(gCol, gRow);
+        
+        this.openSet = [this.startNode];
+        this.closedSet = [];
+        this.path = [];
+        this.phase = 'SEARCHING';
+        
+        this.agent.active = false;
+        this.agent.pathIdx = 0;
+    }
+
+    /**
+     * Select the next milestone destination along the auto-navigation loop
      */
     selectNextCheckpoint() {
         if (this.checkpoints.length === 0) return;
+
+        this.customGoal = null;
 
         // Start node is the previous target
         let startCP = this.checkpoints[this.checkpointIndex];
@@ -230,7 +339,15 @@ class AStarVisualizer {
                 if (this.openSet.length === 0) {
                     this.phase = 'INIT';
                     setTimeout(() => {
-                        this.generateGrid();
+                        if (this.customGoal) {
+                            // If custom goal fails, clear it and resume auto loop
+                            this.customGoal = null;
+                        }
+                        if (this.mapLoaded) {
+                            this.generateGridFromImage();
+                        } else {
+                            this.generateFallbackGrid();
+                        }
                         this.selectNextCheckpoint();
                     }, 1000);
                     return;
@@ -344,7 +461,7 @@ class AStarVisualizer {
             this.phase = 'PATH_FOUND';
             setTimeout(() => {
                 this.selectNextCheckpoint();
-            }, 1500);
+            }, 1800);
             return;
         }
 
@@ -355,7 +472,7 @@ class AStarVisualizer {
         let dx = targetX - this.agent.x;
         let dy = targetY - this.agent.y;
         let dist = Math.hypot(dx, dy);
-        let driveSpeed = 2.2; // Smooth driving speed
+        let driveSpeed = 2.4; // Smooth driving speed
 
         if (dist <= driveSpeed) {
             this.agent.x = targetX;
@@ -371,146 +488,92 @@ class AStarVisualizer {
     }
 
     /**
-     * Draw the beautiful Pittsburgh Map Backdrop and Pathfinding
+     * Draw the actual Pittsburgh map backdrop and the A* routing overlays
      */
     draw(isLightTheme = false) {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-
-        // Themes
         const colors = {
-            land: isLightTheme ? '#fcfcfc' : '#0f172a',
-            river: isLightTheme ? 'rgba(186, 230, 253, 0.45)' : 'rgba(30, 41, 59, 0.75)',
-            riverBorder: isLightTheme ? 'rgba(14, 165, 233, 0.15)' : 'rgba(56, 189, 248, 0.12)',
-            bridge: isLightTheme ? '#64748b' : '#94a3b8',
-            closed: isLightTheme ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)',
-            open: isLightTheme ? 'rgba(139, 92, 246, 0.22)' : 'rgba(139, 92, 246, 0.15)',
-            path: isLightTheme ? '#4f46e5' : '#06b6d4',
-            pathGlow: isLightTheme ? 'rgba(79, 70, 229, 0.4)' : 'rgba(6, 182, 212, 0.5)',
-            textWatermark: isLightTheme ? 'rgba(0, 0, 0, 0.03)' : 'rgba(255, 255, 255, 0.02)',
-            street: isLightTheme ? 'rgba(0, 0, 0, 0.025)' : 'rgba(255, 255, 255, 0.015)',
+            closed: isLightTheme ? 'rgba(79, 70, 229, 0.12)' : 'rgba(99, 102, 241, 0.08)',
+            open: isLightTheme ? 'rgba(139, 92, 246, 0.28)' : 'rgba(139, 92, 246, 0.22)',
+            path: isLightTheme ? '#2563eb' : '#06b6d4',
+            pathGlow: isLightTheme ? 'rgba(37, 99, 235, 0.45)' : 'rgba(6, 182, 212, 0.5)',
+            textWatermark: isLightTheme ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.015)',
             poiText: isLightTheme ? '#1e293b' : '#f1f5f9',
-            poiDesc: isLightTheme ? '#64748b' : '#94a3b8',
-            poiBg: isLightTheme ? '#ffffff' : '#1e293b',
+            poiDesc: isLightTheme ? '#475569' : '#94a3b8',
+            poiBg: isLightTheme ? 'rgba(255, 255, 255, 0.95)' : 'rgba(30, 41, 59, 0.95)',
             poiBorder: isLightTheme ? '#cbd5e1' : '#475569',
-            agent: '#f59e0b'
+            agent: '#ea580c', // Orange
+            agentGlow: 'rgba(234, 88, 12, 0.4)'
         };
 
-        // Draw Land Background
-        this.ctx.fillStyle = colors.land;
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        if (this.mapLoaded) {
+            // Draw actual map image of Pittsburgh
+            this.ctx.drawImage(this.mapImage, 0, 0, this.canvas.width, this.canvas.height);
+        } else {
+            // Fallback plain landscape background
+            this.ctx.fillStyle = isLightTheme ? '#f8fafc' : '#0f172a';
+            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+            
+            // Draw vector rivers
+            this.ctx.fillStyle = isLightTheme ? '#bae6fd' : '#1e293b';
+            this.ctx.beginPath();
+            let h = this.canvas.height;
+            let w = this.canvas.width;
+            this.ctx.moveTo(w * 0.12, h * 0.50);
+            this.ctx.lineTo(w, h * 0.85 + h * 0.06);
+            this.ctx.lineTo(w, h * 0.85 - h * 0.06);
+            this.ctx.closePath();
+            this.ctx.fill();
+            this.ctx.beginPath();
+            this.ctx.moveTo(w * 0.12, h * 0.50);
+            this.ctx.lineTo(w, h * 0.05 + h * 0.06);
+            this.ctx.lineTo(w, h * 0.05 - h * 0.06);
+            this.ctx.closePath();
+            this.ctx.fill();
+            this.ctx.beginPath();
+            this.ctx.moveTo(w * 0.12, h * 0.50 - h * 0.08);
+            this.ctx.lineTo(0, h * 0.50 - h * 0.08);
+            this.ctx.lineTo(0, h * 0.50 + h * 0.08);
+            this.ctx.lineTo(w * 0.12, h * 0.50 + h * 0.08);
+            this.ctx.closePath();
+            this.ctx.fill();
+        }
 
-        // 1. Draw large elegant typography Watermark
+        // Draw Watermark text
         this.ctx.fillStyle = colors.textWatermark;
-        this.ctx.font = '800 68px "Outfit", sans-serif';
+        this.ctx.font = '800 64px "Outfit", sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
-        this.ctx.fillText("ZACHARY ZDOBINSKI", this.canvas.width / 2, this.canvas.height / 2 - 40);
-        this.ctx.font = '600 24px "Fira Code", monospace';
-        this.ctx.fillText("PITTSBURGH, PA", this.canvas.width / 2, this.canvas.height / 2 + 35);
+        this.ctx.fillText("PITTSBURGH, PA", this.canvas.width / 2, this.canvas.height / 2);
 
-        // 2. Draw styled Rivers (allegheny, monongahela, ohio)
-        this.ctx.fillStyle = colors.river;
-        this.ctx.strokeStyle = colors.riverBorder;
-        this.ctx.lineWidth = 2;
-        this.ctx.beginPath();
-        
-        // Define river points for vector path
-        let h = this.canvas.height;
-        let w = this.canvas.width;
-
-        // Monongahela River shape
-        this.ctx.moveTo(w * 0.12, h * 0.50);
-        this.ctx.lineTo(w, h * 0.85 + h * 0.06);
-        this.ctx.lineTo(w, h * 0.85 - h * 0.06);
-        this.ctx.lineTo(w * 0.12 + w * 0.03, h * 0.50 - h * 0.04);
-        this.ctx.closePath();
-        this.ctx.fill();
-        this.ctx.stroke();
-
-        // Allegheny River shape
-        this.ctx.beginPath();
-        this.ctx.moveTo(w * 0.12, h * 0.50);
-        this.ctx.lineTo(w, h * 0.05 + h * 0.06);
-        this.ctx.lineTo(w, h * 0.05 - h * 0.06);
-        this.ctx.lineTo(w * 0.12 + w * 0.03, h * 0.50 + h * 0.04);
-        this.ctx.closePath();
-        this.ctx.fill();
-        this.ctx.stroke();
-
-        // Ohio River shape
-        this.ctx.beginPath();
-        this.ctx.moveTo(w * 0.12, h * 0.50 - h * 0.08);
-        this.ctx.lineTo(0, h * 0.50 - h * 0.08);
-        this.ctx.lineTo(0, h * 0.50 + h * 0.08);
-        this.ctx.lineTo(w * 0.12, h * 0.50 + h * 0.08);
-        this.ctx.closePath();
-        this.ctx.fill();
-        this.ctx.stroke();
-
-        // 3. Draw Faint street lines in Oakland and Downtown
-        this.ctx.strokeStyle = colors.street;
-        this.ctx.lineWidth = 1;
-        // Downtown grid
-        for (let i = 1; i < 6; i++) {
-            this.ctx.beginPath();
-            this.ctx.moveTo(w * 0.12 + i * 20, h * 0.35);
-            this.ctx.lineTo(w * 0.12 + i * 20 + 20, h * 0.65);
-            this.ctx.stroke();
-        }
-        // Oakland streets (Fifth, Forbes)
-        this.ctx.beginPath();
-        this.ctx.moveTo(w * 0.40, h * 0.30);
-        this.ctx.lineTo(w * 0.90, h * 0.25);
-        this.ctx.moveTo(w * 0.40, h * 0.34);
-        this.ctx.lineTo(w * 0.90, h * 0.29);
-        this.ctx.stroke();
-
-        // 4. Draw Bridges as physical bars crossing rivers
-        this.bridges.forEach(bridge => {
-            let colX = bridge.col * this.cellSize + this.cellSize / 2;
-            let startY = bridge.rowRange[0] * h;
-            let endY = bridge.rowRange[1] * h;
-
-            this.ctx.strokeStyle = colors.bridge;
-            this.ctx.lineWidth = 4;
-            this.ctx.beginPath();
-            this.ctx.moveTo(colX, startY);
-            this.ctx.lineTo(colX, endY);
-            this.ctx.stroke();
-
-            // Bridge name
-            this.ctx.fillStyle = colors.poiDesc;
-            this.ctx.font = '500 8px "Fira Code", monospace';
-            this.ctx.textAlign = 'center';
-            this.ctx.fillText(bridge.name, colX, startY - 4);
-        });
-
-        // 5. Draw A* Closed and Open sets
+        // Render Closed Set (Visited) as small elegant dots
         this.closedSet.forEach(node => {
             this.ctx.fillStyle = colors.closed;
-            this.ctx.fillRect(
-                node.col * this.cellSize + 1,
-                node.row * this.cellSize + 1,
-                this.cellSize - 1,
-                this.cellSize - 1
+            this.ctx.beginPath();
+            this.ctx.arc(
+                node.col * this.cellSize + this.cellSize / 2,
+                node.row * this.cellSize + this.cellSize / 2,
+                2.5, 0, Math.PI * 2
             );
+            this.ctx.fill();
         });
 
+        // Render Open Set (Frontier) as smaller circles
         this.openSet.forEach(node => {
             this.ctx.strokeStyle = colors.open;
-            this.ctx.lineWidth = 0.5;
-            this.ctx.strokeRect(
-                node.col * this.cellSize + 1,
-                node.row * this.cellSize + 1,
-                this.cellSize - 1,
-                this.cellSize - 1
+            this.ctx.lineWidth = 0.75;
+            this.ctx.beginPath();
+            this.ctx.arc(
+                node.col * this.cellSize + this.cellSize / 2,
+                node.row * this.cellSize + this.cellSize / 2,
+                1.5, 0, Math.PI * 2
             );
+            this.ctx.stroke();
         });
 
-        // 6. Draw Final optimal Path (Neon line)
+        // Draw optimal path as a thick, glowing route line
         if (this.path.length > 0) {
             this.ctx.strokeStyle = colors.path;
-            this.ctx.lineWidth = 3.5;
+            this.ctx.lineWidth = 4;
             this.ctx.lineCap = 'round';
             this.ctx.lineJoin = 'round';
             this.ctx.shadowColor = colors.pathGlow;
@@ -527,29 +590,31 @@ class AStarVisualizer {
             this.ctx.shadowBlur = 0; // Reset
         }
 
-        // 7. Draw Driving Agent
+        // Draw driving Agent with direction indicator
         if (this.agent.active) {
+            this.ctx.shadowColor = colors.agentGlow;
+            this.ctx.shadowBlur = 8;
             this.ctx.fillStyle = colors.agent;
             this.ctx.beginPath();
             let headX = this.agent.x;
             let headY = this.agent.y;
             let angle = this.agent.heading || 0;
-            let rSize = 5;
+            let rSize = 6;
             
             this.ctx.moveTo(headX + Math.cos(angle) * rSize * 1.5, headY + Math.sin(angle) * rSize * 1.5);
             this.ctx.lineTo(headX + Math.cos(angle + Math.PI * 0.8) * rSize, headY + Math.sin(angle + Math.PI * 0.8) * rSize);
             this.ctx.lineTo(headX + Math.cos(angle - Math.PI * 0.8) * rSize, headY + Math.sin(angle - Math.PI * 0.8) * rSize);
             this.ctx.closePath();
             this.ctx.fill();
+            this.ctx.shadowBlur = 0;
         }
 
-        // 8. Draw Checkpoint Landmark Pins and Text Boxes
-        this.checkpoints.forEach((cp, idx) => {
+        // Draw Checkpoint Pins
+        this.checkpoints.forEach((cp) => {
             let x = cp.col * this.cellSize + this.cellSize / 2;
             let y = cp.row * this.cellSize + this.cellSize / 2;
 
-            // Pin marker
-            let isCurrentTarget = this.targetNode && (this.targetNode.col === cp.col && this.targetNode.row === cp.row);
+            let isCurrentTarget = this.targetNode && (this.targetNode.col === cp.col && this.targetNode.row === cp.row) && !this.customGoal;
             let isCurrentStart = this.startNode && (this.startNode.col === cp.col && this.startNode.row === cp.row);
 
             this.ctx.fillStyle = isCurrentTarget ? '#ef4444' : (isCurrentStart ? '#10b981' : '#6366f1');
@@ -561,56 +626,93 @@ class AStarVisualizer {
             this.ctx.lineWidth = 1.5;
             this.ctx.stroke();
 
-            // Label Card (Drawn offset)
+            // Label Card (Draw if targeted or mouse-over, here drawn cleanly for reference)
             let textOffset = (cp.row > this.rows * 0.5) ? -24 : 16;
-            this.ctx.font = 'bold 10px "Inter", sans-serif';
+            this.ctx.font = 'bold 9px "Inter", sans-serif';
             this.ctx.textAlign = 'center';
             
-            // Text box background
             let nameWidth = this.ctx.measureText(cp.name).width;
             this.ctx.fillStyle = colors.poiBg;
             this.ctx.strokeStyle = colors.poiBorder;
             this.ctx.lineWidth = 1;
             this.ctx.beginPath();
-            this.ctx.roundRect(x - nameWidth / 2 - 6, y + textOffset - 9, nameWidth + 12, 14, 4);
+            this.ctx.roundRect(x - nameWidth / 2 - 5, y + textOffset - 9, nameWidth + 10, 13, 4);
             this.ctx.fill();
             this.ctx.stroke();
 
-            // Text text
             this.ctx.fillStyle = colors.poiText;
             this.ctx.fillText(cp.name, x, y + textOffset);
-
-            // Subtitle info
-            this.ctx.font = '500 7.5px "Fira Code", monospace';
-            this.ctx.fillStyle = colors.poiDesc;
-            this.ctx.fillText(cp.desc, x, y + textOffset + 12);
         });
 
-        // 9. Draw current navigation HUD overlay in canvas
-        if (this.startNode && this.targetNode) {
-            let startCP = this.checkpoints.find(cp => cp.col === this.startNode.col && cp.row === this.startNode.row);
-            let targetCP = this.checkpoints.find(cp => cp.col === this.targetNode.col && cp.row === this.targetNode.row);
-            if (startCP && targetCP) {
-                this.ctx.fillStyle = isLightTheme ? 'rgba(0, 0, 0, 0.75)' : 'rgba(15, 23, 42, 0.85)';
-                this.ctx.strokeStyle = colors.poiBorder;
-                this.ctx.lineWidth = 1;
-                this.ctx.beginPath();
-                this.ctx.roundRect(15, 15, 260, 48, 6);
-                this.ctx.fill();
-                this.ctx.stroke();
+        // Draw Custom Goal Pin if exists
+        if (this.customGoal) {
+            let x = this.customGoal.col * this.cellSize + this.cellSize / 2;
+            let y = this.customGoal.row * this.cellSize + this.cellSize / 2;
 
-                this.ctx.fillStyle = '#ffffff';
-                this.ctx.textAlign = 'left';
-                
-                this.ctx.font = 'bold 9px "Outfit", sans-serif';
-                this.ctx.fillText("A* GEOGRAPHIC PATH ROUTING", 25, 28);
-                
-                this.ctx.font = '500 8.5px "Fira Code", monospace';
-                this.ctx.fillStyle = '#67e8f9'; // Cyan text
-                this.ctx.fillText(`FROM: ${startCP.name.toUpperCase()}`, 25, 40);
-                this.ctx.fillStyle = '#fca5a5'; // Light red
-                this.ctx.fillText(`TO:   ${targetCP.name.toUpperCase()}`, 25, 52);
+            // Target Pin (Red Pulse)
+            this.ctx.fillStyle = '#ef4444';
+            this.ctx.beginPath();
+            this.ctx.arc(x, y, 7, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.strokeStyle = '#ffffff';
+            this.ctx.lineWidth = 2;
+            this.ctx.stroke();
+
+            // Label Card
+            let textOffset = (this.customGoal.row > this.rows * 0.5) ? -24 : 16;
+            this.ctx.font = 'bold 9.5px "Inter", sans-serif';
+            this.ctx.textAlign = 'center';
+            
+            this.ctx.fillStyle = colors.poiBg;
+            this.ctx.strokeStyle = '#ef4444';
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            this.ctx.roundRect(x - 45, y + textOffset - 9, 90, 13, 4);
+            this.ctx.fill();
+            this.ctx.stroke();
+
+            this.ctx.fillStyle = '#ef4444';
+            this.ctx.fillText("CUSTOM GOAL", x, y + textOffset);
+        }
+
+        // Draw live navigation HUD panel
+        if (this.startNode && this.targetNode) {
+            let startName = "START";
+            let targetName = this.customGoal ? "CUSTOM GOAL" : "DESTINATION";
+
+            let startCP = this.checkpoints.find(cp => cp.col === this.startNode.col && cp.row === this.startNode.row);
+            if (startCP) startName = startCP.name;
+
+            if (!this.customGoal) {
+                let targetCP = this.checkpoints.find(cp => cp.col === this.targetNode.col && cp.row === this.targetNode.row);
+                if (targetCP) targetName = targetCP.name;
             }
+
+            this.ctx.fillStyle = isLightTheme ? 'rgba(255, 255, 255, 0.92)' : 'rgba(15, 23, 42, 0.92)';
+            this.ctx.strokeStyle = colors.poiBorder;
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            this.ctx.roundRect(15, 15, 290, 56, 8);
+            this.ctx.fill();
+            this.ctx.stroke();
+
+            this.ctx.fillStyle = isLightTheme ? '#1e293b' : '#ffffff';
+            this.ctx.textAlign = 'left';
+            
+            this.ctx.font = 'bold 9.5px "Outfit", sans-serif';
+            this.ctx.fillText("A* REAL-TIME GPS ROUTING", 25, 28);
+            
+            this.ctx.font = '500 8.5px "Fira Code", monospace';
+            this.ctx.fillStyle = '#10b981'; // Green
+            this.ctx.fillText(`FROM: ${startName.toUpperCase()}`, 25, 41);
+            
+            this.ctx.fillStyle = '#ef4444'; // Red
+            this.ctx.fillText(`TO:   ${targetName.toUpperCase()}`, 25, 53);
+
+            // Instructions text inside HUD
+            this.ctx.font = 'italic 7.5px "Inter", sans-serif';
+            this.ctx.fillStyle = colors.poiDesc;
+            this.ctx.fillText("Click anywhere on the map to set a custom goal", 130, 28);
         }
     }
 }
