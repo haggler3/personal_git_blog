@@ -275,7 +275,22 @@ class ParticleFilter {
         // 1. Update Ground Truth along the compiled text strokes (floating-point steps)
         let prevGT = { x: this.groundTruth.x, y: this.groundTruth.y };
         
+        let prevIndex = this.pathIndex;
         this.pathIndex = (this.pathIndex + this.speed) % this.pathPoints.length;
+        
+        // Detect loop wrap-around — reinitialize particles tightly around new position
+        if (this.pathIndex < prevIndex) {
+            let firstPt = this.pathPoints[0];
+            for (let i = 0; i < this.particles.length; i++) {
+                let p = this.particles[i];
+                p.px = firstPt.x + randomNormal(0, 5);
+                p.py = firstPt.y + randomNormal(0, 5);
+                p.vx = 0;
+                p.vy = 0;
+                p.weight = 1.0 / this.particles.length;
+            }
+        }
+        
         let currentTarget = this.pathPoints[Math.floor(this.pathIndex)];
         
         this.groundTruth.x = currentTarget.x;
