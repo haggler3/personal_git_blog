@@ -377,7 +377,12 @@
 
             <div class="featured-project-card">
                 <div class="fp-info">
-                    <span class="fp-tag">Autonomous Driving</span>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                        <span class="fp-tag" style="margin-bottom: 0;">Autonomous Driving</span>
+                        <a href="https://github.com/haggler3/NuScene-Pedestrian-Motion-Estimator-" target="_blank" rel="noopener" class="subcard-link" aria-label="GitHub Repository">
+                            <i data-lucide="github"></i>
+                        </a>
+                    </div>
                     <h3>NuScenes Pedestrian &amp; Cyclist Motion Estimator</h3>
                     <p class="fp-description">
                         Built a robust sequence-to-sequence (seq2seq) motion forecasting model with attention for autonomous driving systems using the NuScenes dataset. The system predicts 6-second future trajectories (12 waypoints sampled at 2 Hz) for vulnerable road users (pedestrians and cyclists) under high scene uncertainty.
