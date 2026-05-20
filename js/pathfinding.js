@@ -41,7 +41,6 @@ class AStarVisualizer {
         
         // Map Image properties
         this.mapImage = new Image();
-        this.mapImage.src = 'pittsburgh_map.png';
         this.mapLoaded = false;
         
         this.mapImage.onload = () => {
@@ -49,6 +48,18 @@ class AStarVisualizer {
             this.generateGridFromImage();
             this.selectNextCheckpoint();
         };
+        this.mapImage.src = 'pittsburgh_map.png';
+
+        // Check if already completed (cached)
+        if (this.mapImage.complete) {
+            setTimeout(() => {
+                if (!this.mapLoaded) {
+                    this.mapLoaded = true;
+                    this.generateGridFromImage();
+                    this.selectNextCheckpoint();
+                }
+            }, 0);
+        }
 
         // Pittsburgh Milestones (Fallback & Auto-routing loop)
         this.checkpoints = [
@@ -146,6 +157,17 @@ class AStarVisualizer {
     }
 
     /**
+     * Unified interface to generate grid depending on image loading status
+     */
+    generateGrid() {
+        if (this.mapLoaded) {
+            this.generateGridFromImage();
+        } else {
+            this.generateFallbackGrid();
+        }
+    }
+
+    /**
      * Analyze image pixels to determine where water obstacles are
      */
     generateGridFromImage() {
@@ -153,31 +175,44 @@ class AStarVisualizer {
         offscreen.width = this.canvas.width;
         offscreen.height = this.canvas.height;
         const oCtx = offscreen.getContext('2d');
-        oCtx.drawImage(this.mapImage, 0, 0, offscreen.width, offscreen.height);
+        
+        try {
+            oCtx.drawImage(this.mapImage, 0, 0, offscreen.width, offscreen.height);
+        } catch (e) {
+            console.warn("Could not draw map image to offscreen canvas (CORS restriction). Reverting to vector fallback map.", e);
+            this.generateFallbackGrid();
+            return;
+        }
 
         this.grid = [];
-        for (let c = 0; c < this.cols; c++) {
-            this.grid[c] = [];
-            for (let r = 0; r < this.rows; r++) {
-                // Sample center of grid cell
-                let sampleX = Math.floor(c * this.cellSize + this.cellSize / 2);
-                let sampleY = Math.floor(r * this.cellSize + this.cellSize / 2);
-                
-                // Get pixel color
-                let imgData = oCtx.getImageData(sampleX, sampleY, 1, 1).data;
-                let red = imgData[0];
-                let green = imgData[1];
-                let blue = imgData[2];
+        try {
+            for (let c = 0; c < this.cols; c++) {
+                this.grid[c] = [];
+                for (let r = 0; r < this.rows; r++) {
+                    // Sample center of grid cell
+                    let sampleX = Math.floor(c * this.cellSize + this.cellSize / 2);
+                    let sampleY = Math.floor(r * this.cellSize + this.cellSize / 2);
+                    
+                    // Get pixel color
+                    let imgData = oCtx.getImageData(sampleX, sampleY, 1, 1).data;
+                    let red = imgData[0];
+                    let green = imgData[1];
+                    let blue = imgData[2];
 
-                // Detect water: In stylized maps, water is blue-ish/cyan-ish.
-                // We test if blue is higher than red and green, or if the color matches a soft blue palette.
-                let isWater = (blue > red + 10) && (blue > green - 10) && (red < 210 || blue > 200);
-                
-                // Keep border columns passable
-                let isBorder = c === 0 || r === 0 || c === this.cols - 1 || r === this.rows - 1;
-                
-                this.grid[c][r] = (isWater && !isBorder) ? 1 : 0;
+                    // Detect water: In stylized maps, water is blue-ish/cyan-ish.
+                    // We test if blue is higher than red and green, or if the color matches a soft blue palette.
+                    let isWater = (blue > red + 10) && (blue > green - 10) && (red < 210 || blue > 200);
+                    
+                    // Keep border columns passable
+                    let isBorder = c === 0 || r === 0 || c === this.cols - 1 || r === this.rows - 1;
+                    
+                    this.grid[c][r] = (isWater && !isBorder) ? 1 : 0;
+                }
             }
+        } catch (e) {
+            console.warn("Could not read image pixels (CORS security restriction). Reverting to vector fallback map.", e);
+            this.generateFallbackGrid();
+            return;
         }
 
         // Apply bridge openings to make sure they are traversable
