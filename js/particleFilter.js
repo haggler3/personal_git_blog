@@ -58,6 +58,9 @@ const LETTER_STROKES = {
     ]
 };
 
+// Explicitly export to window for access by pathfinding.js
+window.LETTER_STROKES = LETTER_STROKES;
+
 class Particle {
     constructor(x, y, vx = 0, vy = 0, w = 1.0) {
         this.px = x;
@@ -97,9 +100,9 @@ class ParticleFilter {
         // Text path settings
         this.textToTrace = "ZACHARY ZDOBINSKI";
         this.pathPoints = []; // Compiled continuous points for tracking
-        this.pathIndex = 0;   // Current index on the path
-        this.speed = 1.6;     // Tracking speed along the path (points per frame)
-        this.isOccluded = false; // Simulated measurement loss during path jumps
+        this.pathIndex = 0.0; // Current float index on the path
+        this.speed = 0.35;    // Tracking speed along the path (points per frame, slowed down from 1.6)
+        this.isOccluded = false; // Flag to indicate signal occlusion
         
         // Initialize
         this.compileTextPath();
@@ -107,7 +110,9 @@ class ParticleFilter {
     }
 
     /**
-     * Compile character stroke lines into a continuous array of 2D coordinates
+     * Compile character stroke lines into a continuous array of 2D coordinates.
+     * Incorporates smooth intermediate transitions between non-connected strokes,
+     * marked with isOccluded = true to demonstrate blind dead-reckoning.
      */
     compileTextPath() {
         this.pathPoints = [];
@@ -132,6 +137,7 @@ class ParticleFilter {
         let startY = (this.canvas.height - charHeight) / 2;
         
         let currentX = startX;
+        let prevPt = null; // Track end of last stroke to connect to start of next
         
         for (let w = 0; w < words.length; w++) {
             const word = words[w];
@@ -139,40 +145,55 @@ class ParticleFilter {
                 const char = word[c];
                 const strokes = LETTER_STROKES[char];
                 if (strokes) {
-                    // Compile strokes into continuous points
-                    strokes.forEach((stroke, strokeIdx) => {
-                        // Interpolate points along each stroke segment for high-resolution path
+                    strokes.forEach((stroke) => {
+                        let firstStrokePt = stroke[0];
+                        let firstPtX = currentX + firstStrokePt.x * charWidth;
+                        let firstPtY = startY + firstStrokePt.y * charHeight;
+
+                        // If there was a previous stroke, compile a smooth path connecting them
+                        // representing a transition zone with signal loss
+                        if (prevPt) {
+                            let dist = Math.hypot(firstPtX - prevPt.x, firstPtY - prevPt.y);
+                            let steps = Math.max(Math.ceil(dist / 4), 1); // 4px spacing
+                            for (let step = 0; step < steps; step++) {
+                                let t = step / steps;
+                                this.pathPoints.push({
+                                    x: prevPt.x + (firstPtX - prevPt.x) * t,
+                                    y: prevPt.y + (firstPtY - prevPt.y) * t,
+                                    isOccluded: true
+                                });
+                            }
+                        }
+
+                        // Interpolate points along the actual character stroke (active measurements)
                         for (let s = 0; s < stroke.length - 1; s++) {
                             let p1 = stroke[s];
                             let p2 = stroke[s+1];
                             
-                            // Map normalized (0-1) coordinates to screen coordinates
                             let p1x = currentX + p1.x * charWidth;
                             let p1y = startY + p1.y * charHeight;
                             let p2x = currentX + p2.x * charWidth;
                             let p2y = startY + p2.y * charHeight;
                             
                             let dist = Math.hypot(p2x - p1x, p2y - p1y);
-                            let steps = Math.max(Math.ceil(dist / 3), 1);
+                            let steps = Math.max(Math.ceil(dist / 3), 1); // 3px spacing
                             
                             for (let step = 0; step < steps; step++) {
                                 let t = step / steps;
                                 this.pathPoints.push({
                                     x: p1x + (p2x - p1x) * t,
                                     y: p1y + (p2y - p1y) * t,
-                                    isJump: false
+                                    isOccluded: false
                                 });
                             }
                         }
                         
-                        // Add stroke end marker (a tiny jump if there are more strokes)
-                        if (strokeIdx < strokes.length - 1 || c < word.length - 1) {
-                            // Indicate a jump/non-continuous phase (occlusion demo)
-                            let lastPt = this.pathPoints[this.pathPoints.length - 1];
-                            if (lastPt) {
-                                lastPt.isJumpEnd = true;
-                            }
-                        }
+                        // Set prevPt to the end of this stroke
+                        let lastStrokePt = stroke[stroke.length - 1];
+                        prevPt = {
+                            x: currentX + lastStrokePt.x * charWidth,
+                            y: startY + lastStrokePt.y * charHeight
+                        };
                     });
                 }
                 currentX += charWidth + charSpacing;
@@ -180,14 +201,24 @@ class ParticleFilter {
             currentX += wordSpacing - charSpacing;
         }
         
-        // Loop the path: connect the last point back to the first point with a jump
-        if (this.pathPoints.length > 0) {
-            this.pathPoints[this.pathPoints.length - 1].isJumpEnd = true;
+        // Loop the path: connect the last point back to the first point with a transition
+        if (this.pathPoints.length > 0 && prevPt) {
+            let firstPt = this.pathPoints[0];
+            let dist = Math.hypot(firstPt.x - prevPt.x, firstPt.y - prevPt.y);
+            let steps = Math.max(Math.ceil(dist / 4), 1);
+            for (let step = 0; step < steps; step++) {
+                let t = step / steps;
+                this.pathPoints.push({
+                    x: prevPt.x + (firstPt.x - prevPt.x) * t,
+                    y: prevPt.y + (firstPt.y - prevPt.y) * t,
+                    isOccluded: true
+                });
+            }
         }
     }
 
     reset() {
-        this.pathIndex = 0;
+        this.pathIndex = 0.0;
         this.isOccluded = false;
         
         // Initialize Ground Truth at start of path
@@ -203,8 +234,8 @@ class ParticleFilter {
         for (let i = 0; i < this.numParticles; i++) {
             let px = this.groundTruth.x + randomNormal(0, 30);
             let py = this.groundTruth.y + randomNormal(0, 30);
-            let vx = randomNormal(0, 1);
-            let vy = randomNormal(0, 1);
+            let vx = randomNormal(0, 0.5);
+            let vy = randomNormal(0, 0.5);
             this.particles.push(new Particle(px, py, vx, vy, 1.0 / this.numParticles));
         }
 
@@ -220,19 +251,19 @@ class ParticleFilter {
     step(dt = 1.0) {
         if (this.pathPoints.length === 0) return;
 
-        // 1. Update Ground Truth along the compiled text strokes
+        // 1. Update Ground Truth along the compiled text strokes (floating-point steps)
         let prevGT = { x: this.groundTruth.x, y: this.groundTruth.y };
         
-        this.pathIndex = (this.pathIndex + Math.ceil(this.speed)) % this.pathPoints.length;
-        let currentTarget = this.pathPoints[this.pathIndex];
+        this.pathIndex = (this.pathIndex + this.speed) % this.pathPoints.length;
+        let currentTarget = this.pathPoints[Math.floor(this.pathIndex)];
         
         this.groundTruth.x = currentTarget.x;
         this.groundTruth.y = currentTarget.y;
         this.groundTruth.vx = (this.groundTruth.x - prevGT.x) / dt;
         this.groundTruth.vy = (this.groundTruth.y - prevGT.y) / dt;
         
-        // Identify jumps (non-continuous strokes) to simulate GPS signal loss/occlusion
-        this.isOccluded = currentTarget.isJumpEnd || (Math.hypot(this.groundTruth.vx, this.groundTruth.vy) > 30);
+        // Retrieve occlusion state directly from compiled point
+        this.isOccluded = currentTarget.isOccluded;
 
         // 2. Generate Noisy Measurement (if not occluded)
         if (!this.isOccluded) {
@@ -251,7 +282,6 @@ class ParticleFilter {
             // State Transition:
             // px_t = px_{t-1} + vx_{t-1}*dt + N(0, stdQ)
             // py_t = py_{t-1} + vy_{t-1}*dt + N(0, stdQ)
-            // vx_t = vx_{t-1} + N(0, stdQ_vel)
             p.px += p.vx * dt + randomNormal(0, this.stdQ * 30);
             p.py += p.vy * dt + randomNormal(0, this.stdQ * 30);
             p.vx += randomNormal(0, this.stdQ * 3);
@@ -287,7 +317,6 @@ class ParticleFilter {
                 }
             }
         }
-        // If occluded, weights remain unchanged (pure prediction / dead reckoning)
 
         // 5. Calculate Effective Sample Size (N_eff)
         let sumSqWeights = 0.0;
@@ -338,11 +367,10 @@ class ParticleFilter {
                 c += this.particles[idx].w;
             }
             
-            // Add selected particle (adding small velocity perturbation/jittering to prevent sample deprivation)
             let selected = this.particles[idx].clone();
             selected.w = 1.0 / N; // Uniform weight after resampling
             
-            // Add a tiny bit of exploratory position jitter to resampled points to avoid clustering on a single point
+            // Jitter to prevent sample deprivation
             selected.px += randomNormal(0, 0.5);
             selected.py += randomNormal(0, 0.5);
             
@@ -395,7 +423,7 @@ class ParticleFilter {
     setParameters(stdR, numParticles, stdQ) {
         if (numParticles !== this.numParticles) {
             this.numParticles = numParticles;
-            this.reset(); // Re-initialize particles count
+            this.reset();
         } else {
             this.stdR = stdR;
             this.stdQ = stdQ;
@@ -522,24 +550,39 @@ class ParticleFilter {
         
         // Draw occlusion warning
         if (this.isOccluded) {
-            this.ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
+            this.ctx.fillStyle = 'rgba(239, 68, 68, 0.08)';
             this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
             this.ctx.fillStyle = '#ef4444';
             this.ctx.font = '10px Fira Code';
             this.ctx.fillText("SIGNAL LOSS / DEAD RECKONING MODE", 15, 25);
+            
+            // Draw a dashed path showing where the target is currently moving blindly
+            this.ctx.strokeStyle = 'rgba(239, 68, 68, 0.25)';
+            this.ctx.lineWidth = 1.5;
+            this.ctx.setLineDash([3, 3]);
+            this.ctx.beginPath();
+            this.ctx.moveTo(this.groundTruth.x, this.groundTruth.y);
+            let targetIdx = Math.floor(this.pathIndex);
+            
+            // Find next unoccluded point to draw direction vector
+            for (let idx = targetIdx; idx < targetIdx + 40 && idx < this.pathPoints.length; idx++) {
+                let pt = this.pathPoints[idx];
+                this.ctx.lineTo(pt.x, pt.y);
+                if (!pt.isOccluded) break;
+            }
+            this.ctx.stroke();
+            this.ctx.setLineDash([]);
         }
     }
 
     /**
      * Draw 2D Covariance Ellipse
-     * Uses eigenvalues of [xx xy; xy yy] to find semi-major and semi-minor axes.
      */
     drawCovarianceEllipse(ellipseColor) {
         let xx = this.covariance.xx;
         let yy = this.covariance.yy;
         let xy = this.covariance.xy;
 
-        // Calculate eigenvalues: lambda = (tr(Cov) +- sqrt(tr(Cov)^2 - 4*det(Cov))) / 2
         let trace = xx + yy;
         let det = xx * yy - xy * xy;
         let discriminant = Math.sqrt(Math.max(0, trace * trace - 4 * det));
@@ -547,15 +590,12 @@ class ParticleFilter {
         let lambda1 = (trace + discriminant) / 2;
         let lambda2 = (trace - discriminant) / 2;
 
-        // Calculate semi-major and semi-minor axes (2-sigma standard, containing ~95% of probability mass)
         let axisMajor = 2.0 * Math.sqrt(Math.max(0, lambda1));
         let axisMinor = 2.0 * Math.sqrt(Math.max(0, lambda2));
 
-        // Limit axes sizes for cleaner visuals
         axisMajor = Math.max(axisMajor, 4.0);
         axisMinor = Math.max(axisMinor, 4.0);
 
-        // Rotation angle (orientation of major axis)
         let angle = 0;
         if (Math.abs(xy) > 1e-9) {
             angle = Math.atan2(lambda1 - xx, xy);
@@ -563,18 +603,17 @@ class ParticleFilter {
             angle = Math.PI / 2;
         }
 
-        // Draw ellipse
         this.ctx.strokeStyle = ellipseColor;
         this.ctx.lineWidth = 1.5;
         this.ctx.beginPath();
         this.ctx.ellipse(this.estimate.px, this.estimate.py, axisMajor, axisMinor, angle, 0, Math.PI * 2);
         this.ctx.stroke();
         
-        // Fill semi-transparent
         this.ctx.fillStyle = ellipseColor;
         this.ctx.beginPath();
         this.ctx.ellipse(this.estimate.px, this.estimate.py, axisMajor, axisMinor, angle, 0, Math.PI * 2);
         this.ctx.fill();
     }
 }
+
 window.ParticleFilter = ParticleFilter;
