@@ -81,9 +81,9 @@ class ParticleFilter {
         this.ctx = canvas.getContext('2d');
         
         // Filter Parameters (Adjustable via HUD)
-        this.numParticles = 150;
-        this.stdR = 0.15; // Measurement noise standard deviation (meters-scale normalized)
-        this.stdQ = 0.05; // Process model noise standard dev (meters-scale normalized)
+        this.numParticles = 200; // Smoother distribution
+        this.stdR = 0.10; // Tighter sensor tracking
+        this.stdQ = 0.02; // Lower drift velocity
         
         // System variables
         this.particles = [];
@@ -101,8 +101,9 @@ class ParticleFilter {
         this.textToTrace = "ZACHARY ZDOBINSKI";
         this.pathPoints = []; // Compiled continuous points for tracking
         this.pathIndex = 0.0; // Current float index on the path
-        this.speed = 0.20;    // Tracking speed along the path (points per frame, slowed down from 0.35)
+        this.speed = 0.08;    // Significantly slowed down for a smoother trace (points per frame)
         this.isOccluded = false; // Flag to indicate signal occlusion
+        this.theme = 'neon';  // Active simulation color theme
         
         // Initialize
         this.compileTextPath();
@@ -118,11 +119,32 @@ class ParticleFilter {
         this.pathPoints = [];
         const words = this.textToTrace.split(' ');
         
-        let charWidth = 45;
-        let charHeight = 65;
-        let charSpacing = 12;
-        let wordSpacing = 28;
+        // Dynamic character size calculation to prevent overflow and preserve centering
+        let totalUnits = 0;
+        for (let w = 0; w < words.length; w++) {
+            totalUnits += words[w].length * 1.25 - 0.25; // charWidth + spacing
+            if (w < words.length - 1) totalUnits += 0.6; // word spacing
+        }
         
+        let maxTextWidth = this.canvas.width * 0.90;
+        let charWidth = Math.min(45, maxTextWidth / totalUnits);
+        let charHeight = charWidth * 1.44;
+        
+        // Ensure character height does not exceed 50% of the canvas height
+        if (charHeight > this.canvas.height * 0.5) {
+            charHeight = this.canvas.height * 0.5;
+            charWidth = charHeight / 1.44;
+        }
+        
+        let charSpacing = charWidth * 0.25;
+        let wordSpacing = charWidth * 0.6;
+
+        // Save calculated variables to this so they are reused in draw()
+        this.charWidth = charWidth;
+        this.charHeight = charHeight;
+        this.charSpacing = charSpacing;
+        this.wordSpacing = wordSpacing;
+
         // Compute total width to center it on the canvas dynamically
         let totalWidth = 0;
         for (let w = 0; w < words.length; w++) {
@@ -131,7 +153,6 @@ class ParticleFilter {
         }
 
         this.totalTextWidth = totalWidth;
-        this.charHeight = charHeight;
 
         let startX = (this.canvas.width - totalWidth) / 2;
         let startY = (this.canvas.height - charHeight) / 2;
@@ -437,16 +458,60 @@ class ParticleFilter {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
         // Styling configuration based on theme
-        const colors = {
-            letters: isLightTheme ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.03)',
-            grid: isLightTheme ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.01)',
-            particles: isLightTheme ? 'rgba(99, 102, 241, 0.35)' : 'rgba(139, 92, 246, 0.4)',
-            particlesActive: isLightTheme ? 'rgba(6, 182, 212, 0.6)' : 'rgba(6, 182, 212, 0.7)',
-            groundTruth: '#f59e0b', // Amber
-            measurement: '#ef4444', // Red
-            estimate: '#06b6d4', // Cyan
-            ellipse: isLightTheme ? 'rgba(8, 145, 178, 0.25)' : 'rgba(6, 182, 212, 0.2)'
+        const themes = {
+            neon: {
+                letters: isLightTheme ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.03)',
+                grid: isLightTheme ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.01)',
+                particles: isLightTheme ? 'rgba(99, 102, 241, 0.35)' : 'rgba(139, 92, 246, 0.4)',
+                particlesActive: isLightTheme ? 'rgba(6, 182, 212, 0.6)' : 'rgba(6, 182, 212, 0.7)',
+                groundTruth: '#f59e0b', // Amber
+                measurement: '#ef4444', // Red
+                estimate: '#06b6d4', // Cyan
+                ellipse: isLightTheme ? 'rgba(8, 145, 178, 0.25)' : 'rgba(6, 182, 212, 0.2)'
+            },
+            cyberpunk: {
+                letters: isLightTheme ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.03)',
+                grid: isLightTheme ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.01)',
+                particles: isLightTheme ? 'rgba(236, 72, 153, 0.35)' : 'rgba(236, 72, 153, 0.4)',
+                particlesActive: isLightTheme ? 'rgba(168, 85, 247, 0.6)' : 'rgba(168, 85, 247, 0.7)',
+                groundTruth: '#eab308', // Gold
+                measurement: '#f43f5e', // Rose
+                estimate: '#d946ef', // Fuchsia
+                ellipse: isLightTheme ? 'rgba(217, 70, 239, 0.25)' : 'rgba(217, 70, 239, 0.2)'
+            },
+            matrix: {
+                letters: isLightTheme ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.03)',
+                grid: isLightTheme ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.01)',
+                particles: isLightTheme ? 'rgba(34, 197, 94, 0.35)' : 'rgba(34, 197, 94, 0.4)',
+                particlesActive: isLightTheme ? 'rgba(74, 222, 128, 0.6)' : 'rgba(74, 222, 128, 0.7)',
+                groundTruth: '#fbbf24', // Yellow
+                measurement: '#f87171', // Light red
+                estimate: '#4ade80', // Light green
+                ellipse: isLightTheme ? 'rgba(74, 222, 128, 0.25)' : 'rgba(74, 222, 128, 0.2)'
+            },
+            amber: {
+                letters: isLightTheme ? 'rgba(0, 0, 0, 0.04)' : 'rgba(255, 255, 255, 0.03)',
+                grid: isLightTheme ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.01)',
+                particles: isLightTheme ? 'rgba(245, 158, 11, 0.35)' : 'rgba(245, 158, 11, 0.4)',
+                particlesActive: isLightTheme ? 'rgba(251, 191, 36, 0.6)' : 'rgba(251, 191, 36, 0.7)',
+                groundTruth: '#38bdf8', // Light blue
+                measurement: '#f87171', // Light red
+                estimate: '#fbbf24', // Amber
+                ellipse: isLightTheme ? 'rgba(251, 191, 36, 0.25)' : 'rgba(251, 191, 36, 0.2)'
+            },
+            minimal: {
+                letters: isLightTheme ? 'rgba(0, 0, 0, 0.03)' : 'rgba(255, 255, 255, 0.02)',
+                grid: isLightTheme ? 'rgba(0, 0, 0, 0.01)' : 'rgba(255, 255, 255, 0.005)',
+                particles: isLightTheme ? 'rgba(100, 116, 139, 0.3)' : 'rgba(148, 163, 184, 0.35)',
+                particlesActive: isLightTheme ? 'rgba(15, 23, 42, 0.6)' : 'rgba(248, 250, 252, 0.7)',
+                groundTruth: isLightTheme ? '#64748b' : '#94a3b8',
+                measurement: isLightTheme ? '#94a3b8' : '#64748b',
+                estimate: isLightTheme ? '#0f172a' : '#ffffff',
+                ellipse: isLightTheme ? 'rgba(100, 116, 139, 0.2)' : 'rgba(148, 163, 184, 0.15)'
+            }
         };
+
+        const colors = themes[this.theme] || themes.neon;
 
         // Draw structural letters as visual reference background
         this.ctx.lineWidth = 1;
@@ -454,14 +519,14 @@ class ParticleFilter {
         this.ctx.strokeRect(0, 0, this.canvas.width, this.canvas.height);
         
         // Draw the background reference strokes of the name
-        this.ctx.strokeStyle = isLightTheme ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.05)';
-        this.ctx.lineWidth = 2;
-        this.ctx.setLineDash([5, 5]);
+        this.ctx.strokeStyle = isLightTheme ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.1)';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.setLineDash([4, 4]);
         
-        let charWidth = 45;
-        let charHeight = 65;
-        let charSpacing = 12;
-        let wordSpacing = 28;
+        let charWidth = this.charWidth || 45;
+        let charHeight = this.charHeight || 65;
+        let charSpacing = this.charSpacing || 12;
+        let wordSpacing = this.wordSpacing || 28;
         
         const words = this.textToTrace.split(' ');
         let startX = (this.canvas.width - this.totalTextWidth) / 2;

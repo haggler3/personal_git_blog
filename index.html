@@ -13,6 +13,10 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- CSS stylesheet -->
     <link rel="stylesheet" href="css/styles.css">
+    <!-- KaTeX for beautiful math equations -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
 </head>
 <body class="light-theme">
 
@@ -56,8 +60,22 @@
         <!-- Hero & Canvas Visualizer Section -->
         <section id="visualizer" class="visualizer-section">
             <div class="visualizer-container">
-                <!-- Background Canvas -->
+                <!-- Title & Subtitle centered above the canvas -->
+                <div class="visualizer-header">
+                    <h1>ZACHARY ZDOBINSKI</h1>
+                    <p class="subtitle-desc">Sequential Monte Carlo Particle Filter for Pose Estimation &amp; Trajectory Tracking</p>
+                </div>
+
+                <!-- Background Canvas with terminal header -->
                 <div class="canvas-wrapper">
+                    <div class="window-header">
+                        <div class="window-dots">
+                            <span class="dot dot-close"></span>
+                            <span class="dot dot-minimize"></span>
+                            <span class="dot dot-expand"></span>
+                        </div>
+                        <div class="window-title">zachary_zdobinski_pose_estimator.sh</div>
+                    </div>
                     <canvas id="algorithm-canvas"></canvas>
                     <div class="canvas-loading">
                         <div class="spinner"></div>
@@ -65,87 +83,71 @@
                     </div>
                 </div>
 
-                <!-- Simulation Control Panel Overlay (Glassmorphism HUD) -->
-                <div class="hud-panel">
-                    <div class="hud-header">
-                        <h2>Estimation & Path Visualizer</h2>
-                        <span class="pulse-indicator status-live">Live</span>
-                    </div>
-
-                    <!-- Algorithm Mode Selection -->
-                    <div class="hud-group">
-                        <label class="hud-label">Select Algorithm Mode</label>
-                        <div class="mode-toggles">
-                            <button id="btn-pf" class="mode-btn active" data-mode="pf">
-                                <i data-lucide="scatter-chart"></i>
-                                Particle Filter
+                <!-- Squeezed, Ultra-Compact Controller Bar underneath the Canvas -->
+                <div class="compact-hud-bar">
+                    <!-- Controls and Theme Toggles in a row -->
+                    <div class="hud-bar-row">
+                        <!-- Play/Pause and Reset -->
+                        <div class="hud-bar-group action-group">
+                            <button id="btn-pause" class="hud-bar-btn" title="Pause/Resume">
+                                <i data-lucide="pause"></i>
                             </button>
-                            <button id="btn-astar" class="mode-btn" data-mode="astar">
-                                <i data-lucide="git-branch"></i>
-                                A* Pathfinding
+                            <button id="btn-reset" class="hud-bar-btn" title="Reset Simulation">
+                                <i data-lucide="rotate-ccw"></i>
                             </button>
                         </div>
-                    </div>
 
-                    <!-- Live Metrics Dashboard -->
-                    <div class="hud-metrics">
-                        <div class="metric-card" id="metric-primary">
-                            <span class="metric-title">Effective Samples (N_eff)</span>
-                            <span class="metric-value" id="val-neff">180.2</span>
-                            <div class="metric-bar-wrapper">
-                                <div class="metric-bar" id="bar-neff" style="width: 90%;"></div>
+                        <!-- Tiny Sliders -->
+                        <div class="hud-bar-group sliders-group">
+                            <!-- Slider 1 -->
+                            <div class="tiny-slider">
+                                <span class="ts-label">σ_R (Noise)</span>
+                                <input type="range" id="input-slider-1" class="ts-input" min="0.01" max="0.8" step="0.01" value="0.10">
+                                <span class="ts-value" id="val-slider-1">0.10</span>
                             </div>
-                        </div>
-                        <div class="metric-card" id="metric-secondary">
-                            <span class="metric-title">Tracking Error (RMSE)</span>
-                            <span class="metric-value" id="val-rmse">0.024m</span>
-                            <div class="metric-bar-wrapper">
-                                <div class="metric-bar" id="bar-rmse" style="width: 15%;"></div>
+                            
+                            <!-- Slider 2 -->
+                            <div class="tiny-slider">
+                                <span class="ts-label">N (Particles)</span>
+                                <input type="range" id="input-slider-2" class="ts-input" min="20" max="350" step="10" value="200">
+                                <span class="ts-value" id="val-slider-2">200</span>
                             </div>
-                        </div>
-                        <div class="metric-card" id="metric-tertiary">
-                            <span class="metric-title">State Estimate (x̂, ŷ)</span>
-                            <span class="metric-value value-mono" id="val-state">[0.00, 0.00]</span>
-                        </div>
-                    </div>
 
-                    <!-- Controller Sliders -->
-                    <div class="hud-controls">
-                        <!-- Slider 1 -->
-                        <div class="slider-control" id="ctrl-slider-1">
-                            <div class="slider-header">
-                                <span class="slider-title">Sensor Measurement Noise (σ_R)</span>
-                                <span class="slider-value" id="val-slider-1">0.15</span>
+                            <!-- Slider 3 -->
+                            <div class="tiny-slider">
+                                <span class="ts-label">σ_Q (Drift)</span>
+                                <input type="range" id="input-slider-3" class="ts-input" min="0.005" max="0.2" step="0.005" value="0.02">
+                                <span class="ts-value" id="val-slider-3">0.02</span>
                             </div>
-                            <input type="range" id="input-slider-1" min="0.01" max="0.8" step="0.01" value="0.15">
                         </div>
 
-                        <!-- Slider 2 -->
-                        <div class="slider-control" id="ctrl-slider-2">
-                            <div class="slider-header">
-                                <span class="slider-title">Active Particles (N)</span>
-                                <span class="slider-value" id="val-slider-2">150</span>
-                            </div>
-                            <input type="range" id="input-slider-2" min="20" max="350" step="10" value="150">
-                        </div>
-
-                        <!-- Slider 3 -->
-                        <div class="slider-control" id="ctrl-slider-3">
-                            <div class="slider-header">
-                                <span class="slider-title">Process Model Noise (σ_Q)</span>
-                                <span class="slider-value" id="val-slider-3">0.05</span>
-                            </div>
-                            <input type="range" id="input-slider-3" min="0.005" max="0.2" step="0.005" value="0.05">
+                        <!-- Theme Selector -->
+                        <div class="hud-bar-group theme-group">
+                            <span class="ts-label">Theme</span>
+                            <select id="select-pf-theme" class="hud-bar-select">
+                                <option value="neon">Neon Cyan</option>
+                                <option value="cyberpunk">Cyberpunk Pink</option>
+                                <option value="matrix">Matrix Green</option>
+                                <option value="amber">Refined Amber</option>
+                                <option value="minimal">Classic Slate</option>
+                            </select>
                         </div>
                     </div>
 
-                    <div class="hud-footer">
-                        <button id="btn-reset" class="hud-action-btn">
-                            <i data-lucide="rotate-ccw"></i> Reset Simulation
-                        </button>
-                        <button id="btn-pause" class="hud-action-btn">
-                            <i data-lucide="pause"></i> Pause
-                        </button>
+                    <!-- Tiny Metrics Banner -->
+                    <div class="hud-bar-metrics">
+                        <div class="ts-metric">
+                            <span class="tm-label">N_eff:</span>
+                            <span class="tm-value" id="val-neff">200.0</span>
+                        </div>
+                        <div class="ts-metric">
+                            <span class="tm-label">RMSE:</span>
+                            <span class="tm-value" id="val-rmse">0.00m</span>
+                        </div>
+                        <div class="ts-metric">
+                            <span class="tm-label">Estimate (x̂, ŷ):</span>
+                            <span class="tm-value value-mono" id="val-state">[0.00, 0.00]</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -403,6 +405,33 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Additional Projects -->
+            <div class="additional-projects-header">
+                <h3>Additional Projects</h3>
+            </div>
+            <div class="projects-subgrid">
+                <div class="project-subcard">
+                    <div class="subcard-header">
+                        <span class="subcard-tag">LLM Alignment / Fine-Tuning</span>
+                        <a href="https://github.com/haggler3/FineTuning_to_beat_llama_3" target="_blank" rel="noopener" class="subcard-link" aria-label="GitHub Repository">
+                            <i data-lucide="github"></i>
+                        </a>
+                    </div>
+                    <h4>Fine Tuning to Beat Llama 3</h4>
+                    <span class="subcard-date">Mar 2025 – May 2025 • Carnegie Mellon University</span>
+                    <p class="subcard-description">
+                        Engineered and collaborated on a custom QLoRA fine-tuning strategy for a 7B Mistral model, outperforming Llama-3 70B across domain-specific MedQA and GSM8K benchmarks by 2-3%.
+                    </p>
+                    <div class="subcard-tech">
+                        <span>Artificial Intelligence (AI)</span>
+                        <span>Project Planning</span>
+                        <span>QLoRA</span>
+                        <span>Mistral-7B</span>
+                        <span>PyTorch</span>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <!-- Blog Section -->
@@ -465,7 +494,6 @@
 
     <!-- App Script loading -->
     <script src="js/particleFilter.js"></script>
-    <script src="js/pathfinding.js"></script>
     <script src="js/blog.js"></script>
     <script src="js/app.js"></script>
 </body>

@@ -1,8 +1,8 @@
 /**
- * Grid-based A* Pathfinding Visualizer
- * Traces out routes across an actual image map of Pittsburgh, PA.
- * Uses color-based water detection for obstacles, allowing routing around rivers.
- * Allows user to click anywhere on the map to set a goal.
+ * A* Pathfinding Grid Engine - Pittsburgh Street Network Router
+ * Extracts the traversable road network directly from the image pixels of 'pittsburgh_map.png'.
+ * Routes exclusively along the white street lines and over bridges.
+ * Employs a fixed internal resolution of 1000x600 for coordinate stability, scaled dynamically.
  */
 
 class AStarNode {
@@ -25,27 +25,29 @@ class AStarVisualizer {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         
-        // Grid configuration
-        this.cellSize = 12; // cell size in pixels
-        this.cols = Math.floor(canvas.width / this.cellSize);
-        this.rows = Math.floor(canvas.height / this.cellSize);
+        // Fixed virtual coordinate space for resolution independence
+        this.virtualWidth = 1000;
+        this.virtualHeight = 600;
+        this.cellSize = 10; 
+        this.cols = 100;
+        this.rows = 60;
         
-        this.searchSpeed = 6; // Nodes expanded per frame
-        this.obstacleDensity = 0.22; // For vector fallback only
+        this.searchSpeed = 5; // number of nodes expanded per frame
+        this.obstacleDensity = 0.20; // Stored density value
         
         // State matrices
-        this.grid = [];
+        this.grid = []; // 0 = road (passable), 1 = obstacle (blocked)
         this.openSet = [];
         this.closedSet = [];
         this.path = [];
         
-        // Map Image properties
+        // Image map properties
         this.mapImage = new Image();
         this.mapLoaded = false;
         
         this.mapImage.onload = () => {
             this.mapLoaded = true;
-            this.generateGridFromImage();
+            this.generateGrid();
             this.selectNextCheckpoint();
         };
         this.mapImage.src = 'pittsburgh_map.png';
@@ -55,258 +57,323 @@ class AStarVisualizer {
             setTimeout(() => {
                 if (!this.mapLoaded) {
                     this.mapLoaded = true;
-                    this.generateGridFromImage();
+                    this.generateGrid();
                     this.selectNextCheckpoint();
                 }
             }, 0);
         }
 
-        // Pittsburgh Milestones (Fallback & Auto-routing loop)
+        // Pittsburgh Milestones with normalized coordinate percentages
         this.checkpoints = [
+            {
+                name: "Point State Park",
+                desc: "Pittsburgh PA (The Point)",
+                pctX: 0.12,
+                pctY: 0.50,
+                col: 12,
+                row: 30
+            },
             {
                 name: "University of Pittsburgh",
                 desc: "B.S. in Electrical Engineering",
-                col: Math.floor(this.cols * 0.60),
-                row: Math.floor(this.rows * 0.32)
+                pctX: 0.60,
+                pctY: 0.42,
+                col: 60,
+                row: 25
             },
             {
                 name: "Carnegie Mellon University",
                 desc: "M.S. in ECE (Estimation & ML)",
-                col: Math.floor(this.cols * 0.82),
-                row: Math.floor(this.rows * 0.28)
+                pctX: 0.82,
+                pctY: 0.40,
+                col: 82,
+                row: 24
             },
             {
                 name: "Bechtel Plant Machinery",
                 desc: "Advanced Data Engineer (ML)",
-                col: Math.floor(this.cols * 0.65),
-                row: Math.floor(this.rows * 0.80)
-            },
-            {
-                name: "Point State Park",
-                desc: "Pittsburgh PA (The Point)",
-                col: Math.floor(this.cols * 0.12),
-                row: Math.floor(this.rows * 0.50)
+                pctX: 0.65,
+                pctY: 0.80,
+                col: 65,
+                row: 48
             }
         ];
-        
-        // Define bridges to cross rivers (open cells)
-        this.defineBridges();
 
-        // Start, Target, and Agent
+        // Start, Target, and Driving Agent
         this.startNode = null;
         this.targetNode = null;
         this.currentNode = null;
         this.agent = { col: 0, row: 0, x: 0, y: 0, pathIdx: 0, active: false, heading: 0 };
         
-        // Custom goal set by clicking
         this.customGoal = null;
-        
-        // Visualizer phases: 'INIT', 'SEARCHING', 'PATH_FOUND', 'DRIVING'
-        this.phase = 'INIT';
+        this.phase = 'INIT'; // 'INIT', 'SEARCHING', 'PATH_FOUND', 'DRIVING'
         this.checkpointIndex = 0;
         
-        // Set up click listener on canvas
+        // Set up click handler to translate coordinates correctly
         this.setupClickListener();
-
-        // Initialize fallback grid
-        this.generateFallbackGrid();
-        this.selectNextCheckpoint();
     }
 
     /**
-     * Set up click handler to allow routing to any spot
+     * Unified resize handler called by app.js.
+     * Prevents app.js from overwriting cols/rows, keeping grid fixed.
+     */
+    handleResize(canvasWidth, canvasHeight) {
+        // No-op for grid resizing since we use a fixed 1000x600 coordinate mapping scaled dynamically.
+        console.log(`A* Visualizer scaled dynamically to visual size: ${canvasWidth}x${canvasHeight}`);
+    }
+
+    /**
+     * Store obstacle density and trigger regeneration
+     */
+    setObstacleDensity(val) {
+        this.obstacleDensity = val;
+        this.generateGrid();
+    }
+
+    /**
+     * Set up canvas click listener to route to any clicked coordinate or landmark
      */
     setupClickListener() {
-        // Remove existing listener if any, and bind
         this.canvas.removeEventListener('click', this.canvasClickHandler);
         this.canvasClickHandler = (event) => {
-            // Only capture clicks if A* is the active tab
-            const activeTab = document.querySelector('.ctrl-tab-btn.active');
-            if (activeTab && activeTab.id === 'btn-astar') {
+            // Check if A* mode is active in HUD
+            const activeModeBtn = document.querySelector('.mode-btn.active');
+            const isAStarMode = activeModeBtn && activeModeBtn.dataset.mode === 'astar';
+            
+            if (isAStarMode) {
                 const rect = this.canvas.getBoundingClientRect();
-                const x = event.clientX - rect.left;
-                const y = event.clientY - rect.top;
-                this.setGoalAt(x, y);
+                const clickX = event.clientX - rect.left;
+                const clickY = event.clientY - rect.top;
+                
+                // Map screen coordinates back to virtual 1000x600 space
+                const virtualX = clickX * (this.virtualWidth / this.canvas.width);
+                const virtualY = clickY * (this.virtualHeight / this.canvas.height);
+                
+                // Check if user clicked close to any landmark pin
+                let clickedIdx = -1;
+                this.checkpoints.forEach((cp, idx) => {
+                    let pinX = cp.col * this.cellSize + this.cellSize / 2;
+                    let pinY = cp.row * this.cellSize + this.cellSize / 2;
+                    let dist = Math.hypot(virtualX - pinX, virtualY - pinY);
+                    if (dist < 18) { // 18 virtual pixels radius for easy click
+                        clickedIdx = idx;
+                    }
+                });
+
+                if (clickedIdx !== -1) {
+                    const selectStart = document.getElementById('select-start-landmark');
+                    const selectEnd = document.getElementById('select-end-landmark');
+                    
+                    if (selectStart && selectEnd) {
+                        // Find closest checkpoint to current agent position as the starting landmark
+                        let agentIdx = 0;
+                        let minDist = Infinity;
+                        this.checkpoints.forEach((cp, idx) => {
+                            let dist = Math.hypot(this.agent.col - cp.col, this.agent.row - cp.row);
+                            if (dist < minDist) {
+                                minDist = dist;
+                                agentIdx = idx;
+                            }
+                        });
+                        
+                        // Prevent routing to the same node
+                        if (agentIdx === clickedIdx) {
+                            // Find another index to make start different, or just use it
+                            agentIdx = (clickedIdx + 1) % this.checkpoints.length;
+                        }
+
+                        selectStart.value = agentIdx;
+                        selectEnd.value = clickedIdx;
+                        
+                        this.routeBetweenLandmarks(agentIdx, clickedIdx);
+                    }
+                } else {
+                    this.setGoalAt(virtualX, virtualY);
+                }
             }
         };
         this.canvas.addEventListener('click', this.canvasClickHandler);
     }
 
     /**
-     * Define bridge crossings where paths are open
-     */
-    defineBridges() {
-        this.bridges = [
-            // West End Bridge (Ohio River)
-            { name: "West End Bridge", col: Math.floor(this.cols * 0.06), rowRange: [0.44, 0.56] },
-            // Fort Duquesne Bridge (Allegheny River)
-            { name: "Fort Duquesne Bridge", col: Math.floor(this.cols * 0.16), rowRange: [0.38, 0.50] },
-            // Andy Warhol Bridge (Allegheny River)
-            { name: "Andy Warhol Bridge", col: Math.floor(this.cols * 0.30), rowRange: [0.32, 0.44] },
-            // Veterans Bridge (Allegheny River)
-            { name: "Veterans Bridge", col: Math.floor(this.cols * 0.44), rowRange: [0.24, 0.36] },
-            // Fort Pitt Bridge (Monongahela River)
-            { name: "Fort Pitt Bridge", col: Math.floor(this.cols * 0.16), rowRange: [0.50, 0.62] },
-            // Smithfield Street Bridge (Monongahela River)
-            { name: "Smithfield St Bridge", col: Math.floor(this.cols * 0.28), rowRange: [0.54, 0.66] },
-            // Birmingham Bridge (Monongahela River)
-            { name: "Birmingham Bridge", col: Math.floor(this.cols * 0.52), rowRange: [0.60, 0.72] },
-            // Hot Metal Bridge (Monongahela River)
-            { name: "Hot Metal Bridge", col: Math.floor(this.cols * 0.70), rowRange: [0.65, 0.78] }
-        ];
-    }
-
-    /**
-     * Unified interface to generate grid depending on image loading status
-     */
-    generateGrid() {
-        if (this.mapLoaded) {
-            this.generateGridFromImage();
-        } else {
-            this.generateFallbackGrid();
-        }
-    }
-
-    /**
-     * Analyze image pixels to determine where water obstacles are
+     * Generate the occupancy grid from the high-contrast map image
      */
     generateGridFromImage() {
         const offscreen = document.createElement('canvas');
-        offscreen.width = this.canvas.width;
-        offscreen.height = this.canvas.height;
+        offscreen.width = this.virtualWidth;
+        offscreen.height = this.virtualHeight;
         const oCtx = offscreen.getContext('2d');
         
         try {
-            oCtx.drawImage(this.mapImage, 0, 0, offscreen.width, offscreen.height);
+            oCtx.drawImage(this.mapImage, 0, 0, this.virtualWidth, this.virtualHeight);
         } catch (e) {
-            console.warn("Could not draw map image to offscreen canvas (CORS restriction). Reverting to vector fallback map.", e);
-            this.generateFallbackGrid();
+            console.warn("Could not render map image offscreen. Reverting to empty grid.", e);
+            this.generateEmptyGrid();
             return;
         }
 
         this.grid = [];
-        try {
-            for (let c = 0; c < this.cols; c++) {
-                this.grid[c] = [];
-                for (let r = 0; r < this.rows; r++) {
-                    // Sample center of grid cell
-                    let sampleX = Math.floor(c * this.cellSize + this.cellSize / 2);
-                    let sampleY = Math.floor(r * this.cellSize + this.cellSize / 2);
-                    
-                    // Get pixel color
-                    let imgData = oCtx.getImageData(sampleX, sampleY, 1, 1).data;
-                    let red = imgData[0];
-                    let green = imgData[1];
-                    let blue = imgData[2];
-
-                    // Detect water: In stylized maps, water is blue-ish/cyan-ish.
-                    // We test if blue is higher than red and green, or if the color matches a soft blue palette.
-                    let isWater = (blue > red + 10) && (blue > green - 10) && (red < 210 || blue > 200);
-                    
-                    // Keep border columns passable
-                    let isBorder = c === 0 || r === 0 || c === this.cols - 1 || r === this.rows - 1;
-                    
-                    this.grid[c][r] = (isWater && !isBorder) ? 1 : 0;
-                }
-            }
-        } catch (e) {
-            console.warn("Could not read image pixels (CORS security restriction). Reverting to vector fallback map.", e);
-            this.generateFallbackGrid();
-            return;
-        }
-
-        // Apply bridge openings to make sure they are traversable
-        this.bridges.forEach(bridge => {
-            let startRow = Math.floor(bridge.rowRange[0] * this.rows);
-            let endRow = Math.floor(bridge.rowRange[1] * this.rows);
-            let col = bridge.col;
-            if (col >= 0 && col < this.cols) {
-                for (let r = startRow; r <= endRow; r++) {
-                    if (r >= 0 && r < this.rows) {
-                        this.grid[col][r] = 0; // Clear river obstacle at bridge
+        let roadCount = 0;
+        
+        // Analyze image pixels for each grid cell
+        for (let c = 0; c < this.cols; c++) {
+            this.grid[c] = [];
+            for (let r = 0; r < this.rows; r++) {
+                // Sample a sub-grid of pixels inside the cell boundary
+                let hasRoad = false;
+                let stepX = Math.max(1, Math.floor(this.cellSize / 3));
+                let stepY = Math.max(1, Math.floor(this.cellSize / 3));
+                
+                for (let sx = 1; sx < this.cellSize; sx += stepX) {
+                    for (let sy = 1; sy < this.cellSize; sy += stepY) {
+                        let px = c * this.cellSize + sx;
+                        let py = r * this.cellSize + sy;
+                        
+                        // Bound safety
+                        px = Math.max(0, Math.min(this.virtualWidth - 1, px));
+                        py = Math.max(0, Math.min(this.virtualHeight - 1, py));
+                        
+                        let pixel = oCtx.getImageData(px, py, 1, 1).data;
+                        let red = pixel[0];
+                        let green = pixel[1];
+                        let blue = pixel[2];
+                        
+                        // Check if color is bright white/light gray (streets)
+                        if (red > 110 && green > 110 && blue > 110) {
+                            hasRoad = true;
+                            break;
+                        }
                     }
+                    if (hasRoad) break;
+                }
+
+                // Prevent paths from locking directly on the visual grid borders
+                let isBorder = c <= 1 || r <= 1 || c >= this.cols - 2 || r >= this.rows - 2;
+                
+                if (hasRoad && !isBorder) {
+                    this.grid[c][r] = 0; // Road: traversable
+                    roadCount++;
+                } else {
+                    this.grid[c][r] = 1; // Obstacle (land/river): blocked
                 }
             }
-        });
-
-        // Clear obstacles around checkpoints
-        this.checkpoints.forEach(cp => {
-            this.clearObstaclesAround(cp.col, cp.row, 1);
-        });
+        }
+        
+        console.log(`Street network occupancy grid initialized. Total road cells: ${roadCount}/${this.cols * this.rows} (${((roadCount / (this.cols * this.rows)) * 100).toFixed(1)}%)`);
     }
 
     /**
-     * Fallback mathematical rivers if image fails to load
+     * Fallback empty grid if image drawing fails
      */
-    isInRiver(c, r) {
-        let c_rel = c / this.cols;
-        let r_rel = r / this.rows;
-        if (c_rel <= 0.12) {
-            return Math.abs(r_rel - 0.50) < 0.08;
-        }
-        let alleghenyCenter = 0.50 - (c_rel - 0.12) * 0.48;
-        if (r_rel < 0.50 && Math.abs(r_rel - alleghenyCenter) < 0.06) {
-            return true;
-        }
-        let monongahelaCenter = 0.50 + (c_rel - 0.12) * 0.42;
-        if (r_rel > 0.46 && Math.abs(r_rel - monongahelaCenter) < 0.06) {
-            return true;
-        }
-        return false;
-    }
-
-    generateFallbackGrid() {
+    generateEmptyGrid() {
         this.grid = [];
         for (let c = 0; c < this.cols; c++) {
             this.grid[c] = [];
             for (let r = 0; r < this.rows; r++) {
-                let isRiver = this.isInRiver(c, r);
-                this.grid[c][r] = isRiver ? 1 : 0;
+                this.grid[c][r] = 0; // All passable
             }
         }
+    }
 
-        this.bridges.forEach(bridge => {
-            let startRow = Math.floor(bridge.rowRange[0] * this.rows);
-            let endRow = Math.floor(bridge.rowRange[1] * this.rows);
-            let col = bridge.col;
-            if (col >= 0 && col < this.cols) {
-                for (let r = startRow; r <= endRow; r++) {
-                    if (r >= 0 && r < this.rows) {
-                        this.grid[col][r] = 0;
+    /**
+     * Snap landmark coordinates to the nearest traversable road cell to ensure path planning works
+     */
+    snapLandmarksToRoads() {
+        this.checkpoints.forEach(cp => {
+            let startCol = cp.col;
+            let startRow = cp.row;
+            
+            // Limit bounds
+            startCol = Math.max(0, Math.min(this.cols - 1, startCol));
+            startRow = Math.max(0, Math.min(this.rows - 1, startRow));
+            
+            // If already on a road cell, done
+            if (this.grid[startCol] && this.grid[startCol][startRow] === 0) {
+                cp.col = startCol;
+                cp.row = startRow;
+                return;
+            }
+            
+            // Spiral search for nearest road cell up to radius 30
+            let found = false;
+            for (let radius = 1; radius < 30 && !found; radius++) {
+                for (let dc = -radius; dc <= radius && !found; dc++) {
+                    for (let dr = -radius; dr <= radius && !found; dr++) {
+                        if (Math.abs(dc) !== radius && Math.abs(dr) !== radius) continue;
+                        
+                        let nc = startCol + dc;
+                        let nr = startRow + dr;
+                        
+                        if (nc >= 0 && nc < this.cols && nr >= 0 && nr < this.rows) {
+                            if (this.grid[nc][nr] === 0) {
+                                cp.col = nc;
+                                cp.row = nr;
+                                found = true;
+                            }
+                        }
                     }
                 }
             }
-        });
-
-        this.checkpoints.forEach(cp => {
-            this.clearObstaclesAround(cp.col, cp.row, 1);
+            if (found) {
+                console.log(`Snapped landmark "${cp.name}" to road at [${cp.col}, ${cp.row}]`);
+            } else {
+                console.warn(`Could not snap landmark "${cp.name}" to road network!`);
+            }
         });
     }
 
     /**
-     * Route user directly to clicked spot
+     * Route agent to custom goal on click
      */
-    setGoalAt(x, y) {
-        let gCol = Math.floor(x / this.cellSize);
-        let gRow = Math.floor(y / this.cellSize);
+    setGoalAt(virtualX, virtualY) {
+        let gCol = Math.floor(virtualX / this.cellSize);
+        let gRow = Math.floor(virtualY / this.cellSize);
         
-        gCol = Math.max(1, Math.min(this.cols - 2, gCol));
-        gRow = Math.max(1, Math.min(this.rows - 2, gRow));
+        gCol = Math.max(0, Math.min(this.cols - 1, gCol));
+        gRow = Math.max(0, Math.min(this.rows - 1, gRow));
         
-        // Clear obstacle at endpoint if clicked on water
-        this.grid[gCol][gRow] = 0;
-        this.clearObstaclesAround(gCol, gRow, 1);
+        // Find nearest road cell (snap clicked coordinate to streets)
+        let snappedCol = gCol;
+        let snappedRow = gRow;
+        let found = false;
+        
+        if (this.grid[gCol] && this.grid[gCol][gRow] === 0) {
+            found = true;
+        } else {
+            for (let radius = 1; radius < 35 && !found; radius++) {
+                for (let dc = -radius; dc <= radius && !found; dc++) {
+                    for (let dr = -radius; dr <= radius && !found; dr++) {
+                        if (Math.abs(dc) !== radius && Math.abs(dr) !== radius) continue;
+                        
+                        let nc = gCol + dc;
+                        let nr = gRow + dr;
+                        if (nc >= 0 && nc < this.cols && nr >= 0 && nr < this.rows) {
+                            if (this.grid[nc][nr] === 0) {
+                                snappedCol = nc;
+                                snappedRow = nr;
+                                found = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (!found) {
+            console.warn("Clicked area is too far from any mapped street.");
+            return;
+        }
 
         this.customGoal = {
             name: "Custom Goal",
             desc: "User Clicked Target",
-            col: gCol,
-            row: gRow
+            col: snappedCol,
+            row: snappedRow
         };
 
         // Start planning path from current agent position
         this.startNode = new AStarNode(this.agent.col, this.agent.row);
-        this.targetNode = new AStarNode(gCol, gRow);
+        this.targetNode = new AStarNode(snappedCol, snappedRow);
         
         this.openSet = [this.startNode];
         this.closedSet = [];
@@ -318,33 +385,56 @@ class AStarVisualizer {
     }
 
     /**
-     * Select the next milestone destination along the auto-navigation loop
+     * Route agent between two selected landmark indices
+     */
+    routeBetweenLandmarks(startIdx, endIdx) {
+        if (startIdx < 0 || startIdx >= this.checkpoints.length) return;
+        if (endIdx < 0 || endIdx >= this.checkpoints.length) return;
+        
+        this.customGoal = null;
+        
+        let startCP = this.checkpoints[startIdx];
+        this.startNode = new AStarNode(startCP.col, startCP.row);
+        
+        let targetCP = this.checkpoints[endIdx];
+        this.targetNode = new AStarNode(targetCP.col, targetCP.row);
+        
+        this.openSet = [this.startNode];
+        this.closedSet = [];
+        this.path = [];
+        this.phase = 'SEARCHING';
+        
+        this.agent.col = this.startNode.col;
+        this.agent.row = this.startNode.row;
+        this.agent.x = this.startNode.col * this.cellSize + this.cellSize / 2;
+        this.agent.y = this.startNode.row * this.cellSize + this.cellSize / 2;
+        this.agent.pathIdx = 0;
+        this.agent.active = false;
+        
+        console.log(`Routing between milestones: ${startCP.name} -> ${targetCP.name}`);
+    }
+
+    /**
+     * Select the next destination in the automated path loop
      */
     selectNextCheckpoint() {
         if (this.checkpoints.length === 0) return;
 
         this.customGoal = null;
 
-        // Start node is the previous target
         let startCP = this.checkpoints[this.checkpointIndex];
         this.startNode = new AStarNode(startCP.col, startCP.row);
 
-        // Next checkpoint
         this.checkpointIndex = (this.checkpointIndex + 1) % this.checkpoints.length;
         let targetCP = this.checkpoints[this.checkpointIndex];
         this.targetNode = new AStarNode(targetCP.col, targetCP.row);
 
-        // Clear checkpoints
-        this.clearObstaclesAround(this.startNode.col, this.startNode.row, 1);
-        this.clearObstaclesAround(this.targetNode.col, this.targetNode.row, 1);
-
-        // Reset search structures
         this.openSet = [this.startNode];
         this.closedSet = [];
         this.path = [];
         this.phase = 'SEARCHING';
 
-        // Reset driving agent position
+        // Anchor agent to starting milestone
         this.agent.col = this.startNode.col;
         this.agent.row = this.startNode.row;
         this.agent.x = this.startNode.col * this.cellSize + this.cellSize / 2;
@@ -353,15 +443,25 @@ class AStarVisualizer {
         this.agent.active = false;
     }
 
-    clearObstaclesAround(col, row, radius = 1) {
-        for (let c = -radius; c <= radius; c++) {
-            for (let r = -radius; r <= radius; r++) {
-                let nc = col + c;
-                let nr = row + r;
-                if (nc >= 0 && nc < this.cols && nr >= 0 && nr < this.rows) {
-                    this.grid[nc][nr] = 0;
-                }
-            }
+    /**
+     * Unified interface to generate grid depending on image loading status
+     */
+    generateGrid() {
+        // Enforce grid sizing relative to the 1000x600 virtual resolution, not canvas visual width
+        this.cols = Math.floor(this.virtualWidth / this.cellSize);
+        this.rows = Math.floor(this.virtualHeight / this.cellSize);
+        
+        // Recalculate milestone grid indices
+        this.checkpoints.forEach(cp => {
+            cp.col = Math.floor((cp.pctX * this.virtualWidth) / this.cellSize);
+            cp.row = Math.floor((cp.pctY * this.virtualHeight) / this.cellSize);
+        });
+
+        if (this.mapLoaded) {
+            this.generateGridFromImage();
+            this.snapLandmarksToRoads();
+        } else {
+            this.generateEmptyGrid();
         }
     }
 
@@ -370,25 +470,17 @@ class AStarVisualizer {
      */
     step() {
         if (this.phase === 'SEARCHING') {
-            for (let iteration = 0; iteration < this.searchSpeed; iteration++) {
+            for (let step = 0; step < this.searchSpeed; step++) {
                 if (this.openSet.length === 0) {
+                    // Path blocked or search failed: reset
                     this.phase = 'INIT';
                     setTimeout(() => {
-                        if (this.customGoal) {
-                            // If custom goal fails, clear it and resume auto loop
-                            this.customGoal = null;
-                        }
-                        if (this.mapLoaded) {
-                            this.generateGridFromImage();
-                        } else {
-                            this.generateFallbackGrid();
-                        }
                         this.selectNextCheckpoint();
-                    }, 1000);
+                    }, 1200);
                     return;
                 }
 
-                // Node with lowest f(n)
+                // Get lowest f-cost node
                 let lowestIdx = 0;
                 for (let i = 1; i < this.openSet.length; i++) {
                     if (this.openSet[i].f < this.openSet[lowestIdx].f) {
@@ -399,7 +491,7 @@ class AStarVisualizer {
                 let current = this.openSet[lowestIdx];
                 this.currentNode = current;
 
-                // Check if target reached
+                // Goal reached
                 if (current.equals(this.targetNode)) {
                     this.reconstructPath(current);
                     this.phase = 'DRIVING';
@@ -408,11 +500,10 @@ class AStarVisualizer {
                     return;
                 }
 
-                // Move node to closed list
                 this.openSet.splice(lowestIdx, 1);
                 this.closedSet.push(current);
 
-                // Check neighbors
+                // Examine 8 neighbors
                 let neighbors = this.getNeighbors(current);
                 for (let i = 0; i < neighbors.length; i++) {
                     let neighbor = neighbors[i];
@@ -421,6 +512,7 @@ class AStarVisualizer {
                         continue;
                     }
 
+                    // Octile distance cost metric
                     let dG = (neighbor.col !== current.col && neighbor.row !== current.row) ? 1.414 : 1.0;
                     let tentativeG = current.g + dG;
 
@@ -463,8 +555,8 @@ class AStarVisualizer {
                 let nr = node.row + dr;
 
                 if (nc >= 0 && nc < this.cols && nr >= 0 && nr < this.rows) {
-                    if (this.grid[nc][nr] !== 1) { // Not in river
-                        // Prevent cutting diagonal walls
+                    if (this.grid[nc] && this.grid[nc][nr] === 0) { // On road
+                        // Diagonal wall-cutting prevention
                         if (dc !== 0 && dr !== 0) {
                             if (this.grid[node.col + dc][node.row] === 1 || this.grid[node.col][node.row + dr] === 1) {
                                 continue;
@@ -491,128 +583,113 @@ class AStarVisualizer {
     driveAgent() {
         if (this.path.length === 0) return;
 
-        let targetWaypointIdx = this.agent.pathIdx + 1;
-        if (targetWaypointIdx >= this.path.length) {
+        let nextIdx = this.agent.pathIdx + 1;
+        if (nextIdx >= this.path.length) {
             this.phase = 'PATH_FOUND';
             setTimeout(() => {
                 this.selectNextCheckpoint();
-            }, 1800);
+            }, 2000);
             return;
         }
 
-        let targetWaypoint = this.path[targetWaypointIdx];
-        let targetX = targetWaypoint.col * this.cellSize + this.cellSize / 2;
-        let targetY = targetWaypoint.row * this.cellSize + this.cellSize / 2;
+        let waypoint = this.path[nextIdx];
+        let targetX = waypoint.col * this.cellSize + this.cellSize / 2;
+        let targetY = waypoint.row * this.cellSize + this.cellSize / 2;
 
         let dx = targetX - this.agent.x;
         let dy = targetY - this.agent.y;
         let dist = Math.hypot(dx, dy);
-        let driveSpeed = 2.4; // Smooth driving speed
+        let speed = 2.0; // Drive speed along pixels
 
-        if (dist <= driveSpeed) {
+        if (dist <= speed) {
             this.agent.x = targetX;
             this.agent.y = targetY;
-            this.agent.col = targetWaypoint.col;
-            this.agent.row = targetWaypoint.row;
+            this.agent.col = waypoint.col;
+            this.agent.row = waypoint.row;
             this.agent.pathIdx++;
         } else {
-            this.agent.x += (dx / dist) * driveSpeed;
-            this.agent.y += (dy / dist) * driveSpeed;
+            this.agent.x += (dx / dist) * speed;
+            this.agent.y += (dy / dist) * speed;
             this.agent.heading = Math.atan2(dy, dx);
         }
     }
 
     /**
-     * Draw the actual Pittsburgh map backdrop and the A* routing overlays
+     * Draw the map, A* nodes, paths, and driving agent.
+     * Uses canvas translation scaling to ensure perfect resolution-independent layouts.
      */
     draw(isLightTheme = false) {
+        this.ctx.save();
+        
+        // Automatically scale virtual 1000x600 space to fill the physical canvas dimensions
+        const scaleX = this.canvas.width / this.virtualWidth;
+        const scaleY = this.canvas.height / this.virtualHeight;
+        this.ctx.scale(scaleX, scaleY);
+
+        // Color palettes
         const colors = {
-            closed: isLightTheme ? 'rgba(79, 70, 229, 0.12)' : 'rgba(99, 102, 241, 0.08)',
-            open: isLightTheme ? 'rgba(139, 92, 246, 0.28)' : 'rgba(139, 92, 246, 0.22)',
-            path: isLightTheme ? '#2563eb' : '#06b6d4',
-            pathGlow: isLightTheme ? 'rgba(37, 99, 235, 0.45)' : 'rgba(6, 182, 212, 0.5)',
-            textWatermark: isLightTheme ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.015)',
-            poiText: isLightTheme ? '#1e293b' : '#f1f5f9',
+            closed: isLightTheme ? 'rgba(79, 70, 229, 0.22)' : 'rgba(99, 102, 241, 0.25)',
+            open: isLightTheme ? 'rgba(139, 92, 246, 0.42)' : 'rgba(168, 85, 247, 0.45)',
+            path: isLightTheme ? '#1d4ed8' : '#06b6d4',
+            pathGlow: isLightTheme ? 'rgba(29, 78, 216, 0.4)' : 'rgba(6, 182, 212, 0.55)',
+            poiBg: isLightTheme ? 'rgba(255, 255, 255, 0.94)' : 'rgba(15, 23, 42, 0.92)',
+            poiBorder: isLightTheme ? '#cbd5e1' : '#334155',
+            poiText: isLightTheme ? '#0f172a' : '#f8fafc',
             poiDesc: isLightTheme ? '#475569' : '#94a3b8',
-            poiBg: isLightTheme ? 'rgba(255, 255, 255, 0.95)' : 'rgba(30, 41, 59, 0.95)',
-            poiBorder: isLightTheme ? '#cbd5e1' : '#475569',
-            agent: '#ea580c', // Orange
-            agentGlow: 'rgba(234, 88, 12, 0.4)'
+            agent: '#ea580c',
+            agentGlow: 'rgba(234, 88, 12, 0.5)',
+            watermark: isLightTheme ? 'rgba(0, 0, 0, 0.03)' : 'rgba(255, 255, 255, 0.02)'
         };
 
         if (this.mapLoaded) {
-            // Draw actual map image of Pittsburgh
-            this.ctx.drawImage(this.mapImage, 0, 0, this.canvas.width, this.canvas.height);
+            // Draw high-resolution map
+            this.ctx.drawImage(this.mapImage, 0, 0, this.virtualWidth, this.virtualHeight);
         } else {
-            // Fallback plain landscape background
-            this.ctx.fillStyle = isLightTheme ? '#f8fafc' : '#0f172a';
-            this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-            
-            // Draw vector rivers
-            this.ctx.fillStyle = isLightTheme ? '#bae6fd' : '#1e293b';
-            this.ctx.beginPath();
-            let h = this.canvas.height;
-            let w = this.canvas.width;
-            this.ctx.moveTo(w * 0.12, h * 0.50);
-            this.ctx.lineTo(w, h * 0.85 + h * 0.06);
-            this.ctx.lineTo(w, h * 0.85 - h * 0.06);
-            this.ctx.closePath();
-            this.ctx.fill();
-            this.ctx.beginPath();
-            this.ctx.moveTo(w * 0.12, h * 0.50);
-            this.ctx.lineTo(w, h * 0.05 + h * 0.06);
-            this.ctx.lineTo(w, h * 0.05 - h * 0.06);
-            this.ctx.closePath();
-            this.ctx.fill();
-            this.ctx.beginPath();
-            this.ctx.moveTo(w * 0.12, h * 0.50 - h * 0.08);
-            this.ctx.lineTo(0, h * 0.50 - h * 0.08);
-            this.ctx.lineTo(0, h * 0.50 + h * 0.08);
-            this.ctx.lineTo(w * 0.12, h * 0.50 + h * 0.08);
-            this.ctx.closePath();
-            this.ctx.fill();
+            // Loading fallback state
+            this.ctx.fillStyle = isLightTheme ? '#f8fafc' : '#090d16';
+            this.ctx.fillRect(0, 0, this.virtualWidth, this.virtualHeight);
         }
 
-        // Draw Watermark text
-        this.ctx.fillStyle = colors.textWatermark;
-        this.ctx.font = '800 64px "Outfit", sans-serif';
+        // Draw Watermark
+        this.ctx.fillStyle = colors.watermark;
+        this.ctx.font = '800 68px "Outfit", sans-serif';
         this.ctx.textAlign = 'center';
         this.ctx.textBaseline = 'middle';
-        this.ctx.fillText("PITTSBURGH, PA", this.canvas.width / 2, this.canvas.height / 2);
+        this.ctx.fillText("PITTSBURGH STREET MAP", this.virtualWidth / 2, this.virtualHeight / 2);
 
-        // Render Closed Set (Visited) as small elegant dots
+        // Draw search closed set (visited road nodes)
         this.closedSet.forEach(node => {
             this.ctx.fillStyle = colors.closed;
             this.ctx.beginPath();
             this.ctx.arc(
                 node.col * this.cellSize + this.cellSize / 2,
                 node.row * this.cellSize + this.cellSize / 2,
-                2.5, 0, Math.PI * 2
+                3, 0, Math.PI * 2
             );
             this.ctx.fill();
         });
 
-        // Render Open Set (Frontier) as smaller circles
+        // Draw search open set (frontier road nodes)
         this.openSet.forEach(node => {
             this.ctx.strokeStyle = colors.open;
-            this.ctx.lineWidth = 0.75;
+            this.ctx.lineWidth = 1;
             this.ctx.beginPath();
             this.ctx.arc(
                 node.col * this.cellSize + this.cellSize / 2,
                 node.row * this.cellSize + this.cellSize / 2,
-                1.5, 0, Math.PI * 2
+                2, 0, Math.PI * 2
             );
             this.ctx.stroke();
         });
 
-        // Draw optimal path as a thick, glowing route line
+        // Draw planned route line along roads
         if (this.path.length > 0) {
             this.ctx.strokeStyle = colors.path;
-            this.ctx.lineWidth = 4;
+            this.ctx.lineWidth = 5;
             this.ctx.lineCap = 'round';
             this.ctx.lineJoin = 'round';
             this.ctx.shadowColor = colors.pathGlow;
-            this.ctx.shadowBlur = 6;
+            this.ctx.shadowBlur = 8;
             
             this.ctx.beginPath();
             this.path.forEach((pt, idx) => {
@@ -625,26 +702,27 @@ class AStarVisualizer {
             this.ctx.shadowBlur = 0; // Reset
         }
 
-        // Draw driving Agent with direction indicator
+        // Draw vehicle agent driving on roads
         if (this.agent.active) {
             this.ctx.shadowColor = colors.agentGlow;
             this.ctx.shadowBlur = 8;
             this.ctx.fillStyle = colors.agent;
-            this.ctx.beginPath();
-            let headX = this.agent.x;
-            let headY = this.agent.y;
-            let angle = this.agent.heading || 0;
-            let rSize = 6;
             
-            this.ctx.moveTo(headX + Math.cos(angle) * rSize * 1.5, headY + Math.sin(angle) * rSize * 1.5);
-            this.ctx.lineTo(headX + Math.cos(angle + Math.PI * 0.8) * rSize, headY + Math.sin(angle + Math.PI * 0.8) * rSize);
-            this.ctx.lineTo(headX + Math.cos(angle - Math.PI * 0.8) * rSize, headY + Math.sin(angle - Math.PI * 0.8) * rSize);
+            this.ctx.beginPath();
+            let x = this.agent.x;
+            let y = this.agent.y;
+            let angle = this.agent.heading || 0;
+            let size = 7;
+            
+            this.ctx.moveTo(x + Math.cos(angle) * size * 1.6, y + Math.sin(angle) * size * 1.6);
+            this.ctx.lineTo(x + Math.cos(angle + Math.PI * 0.8) * size, y + Math.sin(angle + Math.PI * 0.8) * size);
+            this.ctx.lineTo(x + Math.cos(angle - Math.PI * 0.8) * size, y + Math.sin(angle - Math.PI * 0.8) * size);
             this.ctx.closePath();
             this.ctx.fill();
             this.ctx.shadowBlur = 0;
         }
 
-        // Draw Checkpoint Pins
+        // Draw landmark milestone badges
         this.checkpoints.forEach((cp) => {
             let x = cp.col * this.cellSize + this.cellSize / 2;
             let y = cp.row * this.cellSize + this.cellSize / 2;
@@ -652,26 +730,28 @@ class AStarVisualizer {
             let isCurrentTarget = this.targetNode && (this.targetNode.col === cp.col && this.targetNode.row === cp.row) && !this.customGoal;
             let isCurrentStart = this.startNode && (this.startNode.col === cp.col && this.startNode.row === cp.row);
 
+            // Pulse Pin
             this.ctx.fillStyle = isCurrentTarget ? '#ef4444' : (isCurrentStart ? '#10b981' : '#6366f1');
             this.ctx.beginPath();
-            this.ctx.arc(x, y, 6, 0, Math.PI * 2);
+            this.ctx.arc(x, y, 6.5, 0, Math.PI * 2);
             this.ctx.fill();
             
             this.ctx.strokeStyle = '#ffffff';
             this.ctx.lineWidth = 1.5;
             this.ctx.stroke();
 
-            // Label Card (Draw if targeted or mouse-over, here drawn cleanly for reference)
-            let textOffset = (cp.row > this.rows * 0.5) ? -24 : 16;
-            this.ctx.font = 'bold 9px "Inter", sans-serif';
+            // Labeled Badge Card
+            let textOffset = (cp.row > this.rows * 0.5) ? -22 : 16;
+            this.ctx.font = 'bold 9.5px "Inter", sans-serif';
             this.ctx.textAlign = 'center';
             
             let nameWidth = this.ctx.measureText(cp.name).width;
+            
             this.ctx.fillStyle = colors.poiBg;
             this.ctx.strokeStyle = colors.poiBorder;
             this.ctx.lineWidth = 1;
             this.ctx.beginPath();
-            this.ctx.roundRect(x - nameWidth / 2 - 5, y + textOffset - 9, nameWidth + 10, 13, 4);
+            this.ctx.roundRect(x - nameWidth / 2 - 6, y + textOffset - 9, nameWidth + 12, 13, 4);
             this.ctx.fill();
             this.ctx.stroke();
 
@@ -679,30 +759,29 @@ class AStarVisualizer {
             this.ctx.fillText(cp.name, x, y + textOffset);
         });
 
-        // Draw Custom Goal Pin if exists
+        // Draw custom clicked goal pin
         if (this.customGoal) {
             let x = this.customGoal.col * this.cellSize + this.cellSize / 2;
             let y = this.customGoal.row * this.cellSize + this.cellSize / 2;
 
-            // Target Pin (Red Pulse)
             this.ctx.fillStyle = '#ef4444';
             this.ctx.beginPath();
-            this.ctx.arc(x, y, 7, 0, Math.PI * 2);
+            this.ctx.arc(x, y, 7.5, 0, Math.PI * 2);
             this.ctx.fill();
+            
             this.ctx.strokeStyle = '#ffffff';
             this.ctx.lineWidth = 2;
             this.ctx.stroke();
 
-            // Label Card
-            let textOffset = (this.customGoal.row > this.rows * 0.5) ? -24 : 16;
-            this.ctx.font = 'bold 9.5px "Inter", sans-serif';
+            let textOffset = (this.customGoal.row > this.rows * 0.5) ? -22 : 16;
+            this.ctx.font = 'bold 10px "Inter", sans-serif';
             this.ctx.textAlign = 'center';
             
             this.ctx.fillStyle = colors.poiBg;
             this.ctx.strokeStyle = '#ef4444';
-            this.ctx.lineWidth = 1;
+            this.ctx.lineWidth = 1.2;
             this.ctx.beginPath();
-            this.ctx.roundRect(x - 45, y + textOffset - 9, 90, 13, 4);
+            this.ctx.roundRect(x - 48, y + textOffset - 9, 96, 13, 4);
             this.ctx.fill();
             this.ctx.stroke();
 
@@ -710,7 +789,7 @@ class AStarVisualizer {
             this.ctx.fillText("CUSTOM GOAL", x, y + textOffset);
         }
 
-        // Draw live navigation HUD panel
+        // Draw live telemetry dashboard panel
         if (this.startNode && this.targetNode) {
             let startName = "START";
             let targetName = this.customGoal ? "CUSTOM GOAL" : "DESTINATION";
@@ -723,32 +802,34 @@ class AStarVisualizer {
                 if (targetCP) targetName = targetCP.name;
             }
 
-            this.ctx.fillStyle = isLightTheme ? 'rgba(255, 255, 255, 0.92)' : 'rgba(15, 23, 42, 0.92)';
+            this.ctx.fillStyle = isLightTheme ? 'rgba(255, 255, 255, 0.94)' : 'rgba(15, 23, 42, 0.94)';
             this.ctx.strokeStyle = colors.poiBorder;
             this.ctx.lineWidth = 1;
             this.ctx.beginPath();
-            this.ctx.roundRect(15, 15, 290, 56, 8);
+            this.ctx.roundRect(20, 20, 310, 62, 8);
             this.ctx.fill();
             this.ctx.stroke();
 
-            this.ctx.fillStyle = isLightTheme ? '#1e293b' : '#ffffff';
+            this.ctx.fillStyle = isLightTheme ? '#0f172a' : '#ffffff';
             this.ctx.textAlign = 'left';
             
-            this.ctx.font = 'bold 9.5px "Outfit", sans-serif';
-            this.ctx.fillText("A* REAL-TIME GPS ROUTING", 25, 28);
+            this.ctx.font = 'bold 10px "Outfit", sans-serif';
+            this.ctx.fillText("A* REAL-TIME STREET ROUTING", 30, 34);
             
-            this.ctx.font = '500 8.5px "Fira Code", monospace';
+            this.ctx.font = '600 9px "Fira Code", monospace';
             this.ctx.fillStyle = '#10b981'; // Green
-            this.ctx.fillText(`FROM: ${startName.toUpperCase()}`, 25, 41);
+            this.ctx.fillText(`FROM: ${startName.toUpperCase()}`, 30, 48);
             
             this.ctx.fillStyle = '#ef4444'; // Red
-            this.ctx.fillText(`TO:   ${targetName.toUpperCase()}`, 25, 53);
+            this.ctx.fillText(`TO:   ${targetName.toUpperCase()}`, 30, 61);
 
             // Instructions text inside HUD
-            this.ctx.font = 'italic 7.5px "Inter", sans-serif';
+            this.ctx.font = 'italic 8px "Inter", sans-serif';
             this.ctx.fillStyle = colors.poiDesc;
-            this.ctx.fillText("Click anywhere on the map to set a custom goal", 130, 28);
+            this.ctx.fillText("Click any road to route live", 185, 34);
         }
+
+        this.ctx.restore();
     }
 }
 

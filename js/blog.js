@@ -111,9 +111,17 @@ document.addEventListener('DOMContentLoaded', () => {
         blogModal.setAttribute('aria-hidden', 'false');
         document.body.style.overflow = 'hidden'; // Lock background scroll
 
-        // MathJax/LaTeX renderer trigger if equations are written
-        if (window.MathJax) {
-            window.MathJax.typesetPromise();
+        // Render LaTeX equations via KaTeX
+        if (window.renderMathInElement) {
+            window.renderMathInElement(modalContent, {
+                delimiters: [
+                    {left: "$$", right: "$$", display: true},
+                    {left: "$", right: "$", display: false},
+                    {left: "\\(", right: "\\)", display: false},
+                    {left: "\\[", right: "\\]", display: true}
+                ],
+                throwOnError: false
+            });
         }
     }
 
