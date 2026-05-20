@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zachary Zdobinski | Robotics & AI Systems Engineer</title>
+    <meta name="description" content="Portfolio of Zachary Zdobinski, MS ECE student at Carnegie Mellon University focusing on Estimation, ML Systems, and Trajectory Planning. Featuring a real-time Particle Filter & A* Visualizer.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- CSS stylesheet -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="dark-theme">
+
+    <!-- Header Navigation -->
+    <header class="main-header">
+        <div class="header-container">
+            <a href="#" class="logo">
+                <span class="logo-accent">&lt;</span>Z.Zdobinski<span class="logo-accent">&gt;</span>
+            </a>
+            <nav class="nav-links">
+                <a href="#about" class="nav-link">About</a>
+                <a href="#visualizer" class="nav-link">Visualizer</a>
+                <a href="#resume" class="nav-link">Resume</a>
+                <a href="#projects" class="nav-link">Projects</a>
+                <a href="#blog" class="nav-link">Blog</a>
+                <a href="#contact" class="nav-link">Contact</a>
+            </nav>
+            <div class="nav-actions">
+                <button id="theme-toggle" class="theme-toggle-btn" aria-label="Toggle light/dark theme">
+                    <i data-lucide="sun" class="sun-icon"></i>
+                    <i data-lucide="moon" class="moon-icon"></i>
+                </button>
+                <button class="mobile-nav-toggle" aria-label="Toggle menu">
+                    <i data-lucide="menu"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Mobile Navigation Drawer -->
+    <div class="mobile-nav-drawer">
+        <nav class="mobile-nav-links">
+            <a href="#about" class="mobile-nav-link">About</a>
+            <a href="#visualizer" class="mobile-nav-link">Visualizer</a>
+            <a href="#resume" class="mobile-nav-link">Resume</a>
+            <a href="#projects" class="mobile-nav-link">Projects</a>
+            <a href="#blog" class="mobile-nav-link">Blog</a>
+            <a href="#contact" class="mobile-nav-link">Contact</a>
+        </nav>
+    </div>
+
+    <main>
+        <!-- Hero & Canvas Visualizer Section -->
+        <section id="visualizer" class="visualizer-section">
+            <div class="visualizer-container">
+                <!-- Background Canvas -->
+                <div class="canvas-wrapper">
+                    <canvas id="algorithm-canvas"></canvas>
+                    <div class="canvas-loading">
+                        <div class="spinner"></div>
+                        <p>Initializing State Estimator...</p>
+                    </div>
+                </div>
+
+                <!-- Simulation Control Panel Overlay (Glassmorphism HUD) -->
+                <div class="hud-panel">
+                    <div class="hud-header">
+                        <h2>Estimation & Path Visualizer</h2>
+                        <span class="pulse-indicator status-live">Live</span>
+                    </div>
+
+                    <!-- Algorithm Mode Selection -->
+                    <div class="hud-group">
+                        <label class="hud-label">Select Algorithm Mode</label>
+                        <div class="mode-toggles">
+                            <button id="btn-pf" class="mode-btn active" data-mode="pf">
+                                <i data-lucide="scatter-chart"></i>
+                                Particle Filter
+                            </button>
+                            <button id="btn-astar" class="mode-btn" data-mode="astar">
+                                <i data-lucide="git-branch"></i>
+                                A* Pathfinding
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Live Metrics Dashboard -->
+                    <div class="hud-metrics">
+                        <div class="metric-card" id="metric-primary">
+                            <span class="metric-title">Effective Samples (N_eff)</span>
+                            <span class="metric-value" id="val-neff">180.2</span>
+                            <div class="metric-bar-wrapper">
+                                <div class="metric-bar" id="bar-neff" style="width: 90%;"></div>
+                            </div>
+                        </div>
+                        <div class="metric-card" id="metric-secondary">
+                            <span class="metric-title">Tracking Error (RMSE)</span>
+                            <span class="metric-value" id="val-rmse">0.024m</span>
+                            <div class="metric-bar-wrapper">
+                                <div class="metric-bar" id="bar-rmse" style="width: 15%;"></div>
+                            </div>
+                        </div>
+                        <div class="metric-card" id="metric-tertiary">
+                            <span class="metric-title">State Estimate (x̂, ŷ)</span>
+                            <span class="metric-value value-mono" id="val-state">[0.00, 0.00]</span>
+                        </div>
+                    </div>
+
+                    <!-- Controller Sliders -->
+                    <div class="hud-controls">
+                        <!-- Slider 1 -->
+                        <div class="slider-control" id="ctrl-slider-1">
+                            <div class="slider-header">
+                                <span class="slider-title">Sensor Measurement Noise (σ_R)</span>
+                                <span class="slider-value" id="val-slider-1">0.15</span>
+                            </div>
+                            <input type="range" id="input-slider-1" min="0.01" max="0.8" step="0.01" value="0.15">
+                        </div>
+
+                        <!-- Slider 2 -->
+                        <div class="slider-control" id="ctrl-slider-2">
+                            <div class="slider-header">
+                                <span class="slider-title">Active Particles (N)</span>
+                                <span class="slider-value" id="val-slider-2">150</span>
+                            </div>
+                            <input type="range" id="input-slider-2" min="20" max="350" step="10" value="150">
+                        </div>
+
+                        <!-- Slider 3 -->
+                        <div class="slider-control" id="ctrl-slider-3">
+                            <div class="slider-header">
+                                <span class="slider-title">Process Model Noise (σ_Q)</span>
+                                <span class="slider-value" id="val-slider-3">0.05</span>
+                            </div>
+                            <input type="range" id="input-slider-3" min="0.005" max="0.2" step="0.005" value="0.05">
+                        </div>
+                    </div>
+
+                    <div class="hud-footer">
+                        <button id="btn-reset" class="hud-action-btn">
+                            <i data-lucide="rotate-ccw"></i> Reset Simulation
+                        </button>
+                        <button id="btn-pause" class="hud-action-btn">
+                            <i data-lucide="pause"></i> Pause
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Scroll Indicator -->
+            <div class="scroll-indicator">
+                <p>Explore Resume &amp; Portfolio</p>
+                <i data-lucide="chevron-down" class="bounce"></i>
+            </div>
+        </section>
+
+        <!-- About Me Section -->
+        <section id="about" class="section container">
+            <div class="section-header">
+                <span class="subtitle">Introduction</span>
+                <h2>About Zachary Zdobinski</h2>
+                <div class="header-line"></div>
+            </div>
+
+            <div class="about-grid">
+                <div class="about-text">
+                    <p class="lead">
+                        I am an Advanced Data Engineer and Electrical Engineer specializing in <strong>Estimation and Detection, Machine Learning Systems, and Autonomous Robotics Control</strong>. Currently pursuing my MS in Electrical and Computer Engineering at <strong>Carnegie Mellon University</strong>.
+                    </p>
+                    <p>
+                        My work bridges the gap between hardware systems and deep learning. I have experience designing time-series forecasting models, deploying reinforcement learning pipelines locally, and implementing real-time, safety-critical embedded controls. The visualizer above reflects my core engineering interests: tracking dynamic states under uncertainty, planning optimal pathways, and building highly responsive, real-time feedback loops.
+                    </p>
+                    <div class="contact-badges">
+                        <a href="mailto:zrz@andrew.cmu.edu" class="badge">
+                            <i data-lucide="mail"></i> zrz@andrew.cmu.edu
+                        </a>
+                        <span class="badge">
+                            <i data-lucide="map-pin"></i> Pittsburgh, PA
+                        </span>
+                        <a href="https://github.com/haggler3" target="_blank" rel="noopener" class="badge">
+                            <i data-lucide="github"></i> github.com/haggler3
+                        </a>
+                        <a href="https://huggingface.co/zacCMU" target="_blank" rel="noopener" class="badge">
+                            <i data-lucide="cpu"></i> huggingface.co/zacCMU
+                        </a>
+                    </div>
+                </div>
+                <div class="about-highlights">
+                    <div class="highlight-card">
+                        <div class="card-icon"><i data-lucide="graduation-cap"></i></div>
+                        <h3>CMU Graduate</h3>
+                        <p>MS in ECE focused on Estimation, Detection & ML Deployment.</p>
+                    </div>
+                    <div class="highlight-card">
+                        <div class="card-icon"><i data-lucide="shield-check"></i></div>
+                        <h3>Safety-Critical C++</h3>
+                        <p>2+ years engineering mission-critical instrumentation and systems.</p>
+                    </div>
+                    <div class="highlight-card">
+                        <div class="card-icon"><i data-lucide="bot"></i></div>
+                        <h3>Robotics & Estimation</h3>
+                        <p>Specialist in LQR/MPC, Kalman filters, and motion prediction.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Resume Section -->
+        <section id="resume" class="resume-section section">
+            <div class="container">
+                <div class="section-header">
+                    <span class="subtitle">Experience &amp; Education</span>
+                    <h2>Interactive Resume</h2>
+                    <div class="header-line"></div>
+                </div>
+
+                <!-- Tabs Navigation -->
+                <div class="resume-tabs">
+                    <button class="resume-tab active" data-tab="experience">
+                        <i data-lucide="briefcase"></i> Work Experience
+                    </button>
+                    <button class="resume-tab" data-tab="education">
+                        <i data-lucide="book-open"></i> Education &amp; Research
+                    </button>
+                    <button class="resume-tab" data-tab="skills">
+                        <i data-lucide="sliders"></i> Skills &amp; Control
+                    </button>
+                </div>
+
+                <!-- Tab Content: Experience -->
+                <div class="tab-content active" id="tab-experience">
+                    <div class="timeline">
+                        <!-- Job 1 -->
+                        <div class="timeline-item">
+                            <div class="timeline-marker"></div>
+                            <div class="timeline-content">
+                                <span class="timeline-date">April 2025 — Present</span>
+                                <h3>Advanced Data Engineer (Machine Learning & Systems)</h3>
+                                <h4>Bechtel Plant Machinery | Pittsburgh, PA</h4>
+                                <ul class="timeline-details">
+                                    <li>Architecting an LLM-driven failure analysis pipeline to process unstructured reliability logs, projecting significant cost recovery.</li>
+                                    <li>Pioneering cloud-native microservices migration: authored technical vision and architecture, unifying cross-business distributed data streams and eliminating manual reporting.</li>
+                                    <li>Leading technical direction for AI initiatives in nuclear instrumentation and control systems, establishing model observability and code review best practices.</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <!-- Job 2 -->
+                        <div class="timeline-item">
+                            <div class="timeline-marker"></div>
+                            <div class="timeline-content">
+                                <span class="timeline-date">April 2024 — April 2025</span>
+                                <h3>Electrical Engineer (Machine Learning & Systems)</h3>
+                                <h4>Bechtel Plant Machinery | Pittsburgh, PA</h4>
+                                <ul class="timeline-details">
+                                    <li>Designed, debugged, and deployed an LSTM model on millions of rows of time-series sensor data (PySpark, PyTorch) to extract actionable system health signals.</li>
+                                    <li>Built a physics-based integrated system model in state space and transfer functions to troubleshoot complex dynamic system anomalies.</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <!-- Job 3 -->
+                        <div class="timeline-item">
+                            <div class="timeline-marker"></div>
+                            <div class="timeline-content">
+                                <span class="timeline-date">Dec 2021 — April 2024</span>
+                                <h3>Electrical Engineer (Software Engineer)</h3>
+                                <h4>Bechtel Plant Machinery | Pittsburgh, PA</h4>
+                                <ul class="timeline-details">
+                                    <li>Aided the resolution of integration issues between hardware and real-time software modules, improving system reliability for safety-critical power infrastructure.</li>
+                                    <li>Developed algorithms and data structures for real-time software emulation and conducted rigorous verification for modular power equipment in C++.</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Education & Research -->
+                <div class="tab-content" id="tab-education">
+                    <div class="education-grid">
+                        <div class="edu-card">
+                            <span class="edu-date">Jan 2023 - May 2026</span>
+                            <h3>Master of Science in Electrical and Computer Engineering</h3>
+                            <h4>Carnegie Mellon University | Pittsburgh, PA</h4>
+                            <p class="edu-focus"><strong>Focus Area:</strong> Design &amp; Deployment of ML Systems, Estimation and Detection</p>
+                        </div>
+                        <div class="edu-card">
+                            <span class="edu-date">Aug 2018 - July 2021</span>
+                            <h3>Bachelor of Science in Electrical Engineering</h3>
+                            <h4>University of Pittsburgh | Pittsburgh, PA</h4>
+                        </div>
+                    </div>
+
+                    <div class="research-section-inner">
+                        <h3>Research Projects</h3>
+                        <div class="research-card">
+                            <div class="research-header">
+                                <h4>Generative AI Based Engineering Design Optimization</h4>
+                                <span class="research-org">Carnegie Mellon University | Aug 2025 – Present</span>
+                            </div>
+                            <p>
+                                Engineered a local Reinforcement Learning (RL) training harness using Group Relative Policy Optimization (GRPO) across 3B, 7B, and 14B parameter language models. Designed a custom multi-threaded rollout mechanism and a software-based physical reward function.
+                            </p>
+                            <span class="pub-status">Co-author, Design Bench @ IDETC 2026 (In Submission)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Skills -->
+                <div class="tab-content" id="tab-skills">
+                    <div class="skills-grid">
+                        <!-- Category 1 -->
+                        <div class="skills-category">
+                            <h3><i data-lucide="code"></i> Languages</h3>
+                            <div class="skill-tags">
+                                <span class="skill-tag">C++ (Safety-Critical, Real-Time)</span>
+                                <span class="skill-tag">Python</span>
+                                <span class="skill-tag">SQL</span>
+                                <span class="skill-tag">Bash</span>
+                            </div>
+                        </div>
+                        <!-- Category 2 -->
+                        <div class="skills-category">
+                            <h3><i data-lucide="navigation"></i> Robotics & Control</h3>
+                            <div class="skill-tags">
+                                <span class="skill-tag">Estimation & Detection</span>
+                                <span class="skill-tag">Kalman Filtering</span>
+                                <span class="skill-tag">Sensor Fusion</span>
+                                <span class="skill-tag">LQR/MPC Control</span>
+                                <span class="skill-tag">Motion Forecasting</span>
+                                <span class="skill-tag">Trajectory Planning</span>
+                                <span class="skill-tag">Kinematics</span>
+                            </div>
+                        </div>
+                        <!-- Category 3 -->
+                        <div class="skills-category">
+                            <h3><i data-lucide="brain"></i> AI & Machine Learning</h3>
+                            <div class="skill-tags">
+                                <span class="skill-tag">Time-Series Modeling (LSTM)</span>
+                                <span class="skill-tag">Transformers</span>
+                                <span class="skill-tag">Reinforcement Learning (GRPO)</span>
+                                <span class="skill-tag">Transformer Fine-Tuning (QLoRA)</span>
+                                <span class="skill-tag">Feature Engineering</span>
+                                <span class="skill-tag">PyTorch</span>
+                                <span class="skill-tag">Weights &amp; Biases</span>
+                            </div>
+                        </div>
+                        <!-- Category 4 -->
+                        <div class="skills-category">
+                            <h3><i data-lucide="layers"></i> Systems &amp; Tools</h3>
+                            <div class="skill-tags">
+                                <span class="skill-tag">Embedded Systems</span>
+                                <span class="skill-tag">Distributed Systems</span>
+                                <span class="skill-tag">PySpark</span>
+                                <span class="skill-tag">AWS Cloud</span>
+                                <span class="skill-tag">Docker</span>
+                                <span class="skill-tag">CI/CD</span>
+                                <span class="skill-tag">Git</span>
+                                <span class="skill-tag">Linux / Unix</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Projects Section -->
+        <section id="projects" class="section container">
+            <div class="section-header">
+                <span class="subtitle">Engineering Projects</span>
+                <h2>Featured Project</h2>
+                <div class="header-line"></div>
+            </div>
+
+            <div class="featured-project-card">
+                <div class="fp-info">
+                    <span class="fp-tag">Autonomous Driving</span>
+                    <h3>NuScenes Pedestrian &amp; Cyclist Motion Estimator</h3>
+                    <p class="fp-description">
+                        Built a robust sequence-to-sequence (seq2seq) motion forecasting model with attention for autonomous driving systems using the NuScenes dataset. The system predicts 6-second future trajectories (12 waypoints sampled at 2 Hz) for vulnerable road users (pedestrians and cyclists) under high scene uncertainty.
+                    </p>
+                    <div class="fp-bullets">
+                        <div class="fp-bullet">
+                            <i data-lucide="check-circle-2"></i>
+                            <span><strong>Tracking Accuracy:</strong> Achieved ~0.94m Average Displacement Error (ADE) on held-out test datasets.</span>
+                        </div>
+                        <div class="fp-bullet">
+                            <i data-lucide="check-circle-2"></i>
+                            <span><strong>State Estimation Support:</strong> Specially designed to assist downstream trajectory planners operating on noisy, occluded, or incomplete agent state estimates.</span>
+                        </div>
+                        <div class="fp-bullet">
+                            <i data-lucide="check-circle-2"></i>
+                            <span><strong>Robust Evaluation:</strong> Benchmarked for extreme occlusion scenarios and diverse weather conditions in urban layouts.</span>
+                        </div>
+                    </div>
+                    <div class="fp-tech">
+                        <span>PyTorch</span>
+                        <span>seq2seq</span>
+                        <span>Attention</span>
+                        <span>NuScenes API</span>
+                        <span>LSTMs</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Blog Section -->
+        <section id="blog" class="blog-section section">
+            <div class="container">
+                <div class="section-header">
+                    <span class="subtitle">Research &amp; Thoughts</span>
+                    <h2>Technical Blog</h2>
+                    <div class="header-line"></div>
+                </div>
+
+                <!-- Blog Utilities -->
+                <div class="blog-controls">
+                    <div class="search-box">
+                        <i data-lucide="search"></i>
+                        <input type="text" id="blog-search" placeholder="Search articles by title or keyword...">
+                    </div>
+                    <div class="blog-tags-filter" id="blog-tag-filters">
+                        <button class="filter-tag-btn active" data-tag="all">All</button>
+                        <button class="filter-tag-btn" data-tag="estimation">Estimation</button>
+                        <button class="filter-tag-btn" data-tag="robotics">Robotics</button>
+                        <button class="filter-tag-btn" data-tag="machine-learning">Machine Learning</button>
+                    </div>
+                </div>
+
+                <!-- Dynamic Blog Grid -->
+                <div class="blog-grid" id="blog-posts-container">
+                    <!-- Dynamic posts injected here via JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Blog Article View Modal -->
+        <div class="modal" id="blog-modal" aria-hidden="true">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <button class="modal-close" id="modal-close-btn" aria-label="Close article">
+                    <i data-lucide="x"></i>
+                </button>
+                <article class="modal-article" id="modal-article-content">
+                    <!-- Dynamic article injected here -->
+                </article>
+            </div>
+        </div>
+
+        <!-- Contact Section -->
+        <section id="contact" class="section container">
+            <div class="section-header">
+                <span class="subtitle">Get In Touch</span>
+                <h2>Contact &amp; Collaborations</h2>
+                <div class="header-line"></div>
+            </div>
+
+            <div class="contact-layout">
+                <div class="contact-info-panel">
+                    <h3>Let's build something robust.</h3>
+                    <p>
+                        Whether you want to discuss state estimation filters, reinforcement learning rollouts, or safety-critical C++ architectures, feel free to reach out.
+                    </p>
+                    <div class="contact-info-list">
+                        <div class="info-item">
+                            <i data-lucide="mail"></i>
+                            <div>
+                                <span>Email</span>
+                                <a href="mailto:zrz@andrew.cmu.edu">zrz@andrew.cmu.edu</a>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <i data-lucide="phone"></i>
+                            <div>
+                                <span>Phone</span>
+                                <a href="tel:+14124235644">(412) 423-5644</a>
+                            </div>
+                        </div>
+                        <div class="info-item">
+                            <i data-lucide="linkedin"></i>
+                            <div>
+                                <span>LinkedIn</span>
+                                <a href="https://linkedin.com" target="_blank" rel="noopener">Zachary Zdobinski</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <form class="contact-form" id="contact-me-form">
+                    <div class="form-row">
+                        <div class="input-group">
+                            <input type="text" id="contact-name" required placeholder=" ">
+                            <label for="contact-name">Your Name</label>
+                        </div>
+                        <div class="input-group">
+                            <input type="email" id="contact-email" required placeholder=" ">
+                            <label for="contact-email">Email Address</label>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <input type="text" id="contact-subject" required placeholder=" ">
+                        <label for="contact-subject">Subject</label>
+                    </div>
+                    <div class="input-group">
+                        <textarea id="contact-message" required rows="5" placeholder=" "></textarea>
+                        <label for="contact-message">Your Message</label>
+                    </div>
+                    <button type="submit" class="submit-btn">
+                        <span>Send Message</span>
+                        <i data-lucide="send"></i>
+                    </button>
+                    <div class="form-feedback" id="form-feedback-message"></div>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="main-footer">
+        <div class="container footer-container">
+            <p>&copy; 2026 Zachary Zdobinski. Built with HTML, CSS, and Vanilla JS.</p>
+            <div class="footer-socials">
+                <a href="https://github.com/haggler3" target="_blank" rel="noopener" aria-label="GitHub"><i data-lucide="github"></i></a>
+                <a href="https://linkedin.com" target="_blank" rel="noopener" aria-label="LinkedIn"><i data-lucide="linkedin"></i></a>
+                <a href="https://huggingface.co/zacCMU" target="_blank" rel="noopener" aria-label="Hugging Face"><i data-lucide="cpu"></i></a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- App Script loading -->
+    <script src="js/particleFilter.js"></script>
+    <script src="js/pathfinding.js"></script>
+    <script src="js/blog.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

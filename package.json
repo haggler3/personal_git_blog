@@ -1,0 +1,11 @@
+{
+  "name": "personal-git-blog",
+  "version": "1.0.0",
+  "description": "Zachary Zdobinski - Portfolio & Robotics Visualizer",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx -y serve ."
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
