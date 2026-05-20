@@ -50,10 +50,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const titleState = document.querySelector('#metric-tertiary .metric-title');
 
     // 1. Theme Toggle Management
-    let isLightTheme = localStorage.getItem('theme') === 'light';
+    let isLightTheme = localStorage.getItem('theme') !== 'dark';
     if (isLightTheme) {
         document.body.classList.remove('dark-theme');
         document.body.classList.add('light-theme');
+    } else {
+        document.body.classList.remove('light-theme');
+        document.body.classList.add('dark-theme');
     }
 
     themeToggleBtn.addEventListener('click', () => {
@@ -101,30 +104,32 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // 4. Contact Form Handler (Mock submit)
-    contactForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        
-        // Simple client validations
-        const name = document.getElementById('contact-name').value;
-        const email = document.getElementById('contact-email').value;
-        const subject = document.getElementById('contact-subject').value;
-        const message = document.getElementById('contact-message').value;
+    if (contactForm) {
+        contactForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            
+            // Simple client validations
+            const name = document.getElementById('contact-name').value;
+            const email = document.getElementById('contact-email').value;
+            const subject = document.getElementById('contact-subject').value;
+            const message = document.getElementById('contact-message').value;
 
-        if (!name || !email || !subject || !message) {
-            formFeedback.innerText = "Please fill in all fields.";
-            formFeedback.className = "form-feedback error";
-            return;
-        }
+            if (!name || !email || !subject || !message) {
+                formFeedback.innerText = "Please fill in all fields.";
+                formFeedback.className = "form-feedback error";
+                return;
+            }
 
-        // Mocking submission
-        formFeedback.innerText = "Sending message...";
-        formFeedback.className = "form-feedback success";
-        
-        setTimeout(() => {
-            formFeedback.innerText = "Thank you, Zachary will get back to you shortly!";
-            contactForm.reset();
-        }, 1200);
-    });
+            // Mocking submission
+            formFeedback.innerText = "Sending message...";
+            formFeedback.className = "form-feedback success";
+            
+            setTimeout(() => {
+                formFeedback.innerText = "Thank you, Zachary will get back to you shortly!";
+                contactForm.reset();
+            }, 1200);
+        });
+    }
 
     // ==========================================================================
     // CANVAS SIMULATION CONFIGURATION
@@ -146,7 +151,9 @@ document.addEventListener('DOMContentLoaded', () => {
             astarEngine.cols = Math.floor(canvas.width / astarEngine.cellSize);
             astarEngine.rows = Math.floor(canvas.height / astarEngine.cellSize);
             astarEngine.generateGrid();
-            astarEngine.extractLetterNodes();
+            if (astarEngine.extractLetterNodes) {
+                astarEngine.extractLetterNodes();
+            }
             astarEngine.selectNextCheckpoint();
         }
     }
@@ -238,7 +245,9 @@ document.addEventListener('DOMContentLoaded', () => {
             titleState.innerText = "Robot Position (c, r)";
             
             astarEngine.generateGrid();
-            astarEngine.extractLetterNodes();
+            if (astarEngine.extractLetterNodes) {
+                astarEngine.extractLetterNodes();
+            }
             astarEngine.selectNextCheckpoint();
         }
     }
@@ -252,7 +261,9 @@ document.addEventListener('DOMContentLoaded', () => {
             pfEngine.reset();
         } else {
             astarEngine.generateGrid();
-            astarEngine.extractLetterNodes();
+            if (astarEngine.extractLetterNodes) {
+                astarEngine.extractLetterNodes();
+            }
             astarEngine.selectNextCheckpoint();
         }
     });
@@ -298,7 +309,9 @@ document.addEventListener('DOMContentLoaded', () => {
             astarEngine.cols = Math.floor(canvas.width / val);
             astarEngine.rows = Math.floor(canvas.height / val);
             astarEngine.generateGrid();
-            astarEngine.extractLetterNodes();
+            if (astarEngine.extractLetterNodes) {
+                astarEngine.extractLetterNodes();
+            }
             astarEngine.selectNextCheckpoint();
             valSlider3.innerText = val + "px";
         }

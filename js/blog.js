@@ -16,22 +16,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeTagFilter = 'all';
     let searchQuery = '';
 
-    // Fetch blog posts from JSON data store
-    fetch('data/posts.json')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error("HTTP error " + response.status);
-            }
-            return response.json();
-        })
-        .then(data => {
-            blogPosts = data;
-            renderPosts();
-        })
-        .catch(err => {
-            console.error("Error loading blog posts: ", err);
-            postsContainer.innerHTML = `<p class="error-msg">Failed to load articles. Please run a local web server to fetch data.</p>`;
-        });
+    // Load blog posts from window.BLOG_POSTS (postsData.js) to prevent CORS blockers
+    if (window.BLOG_POSTS) {
+        blogPosts = window.BLOG_POSTS;
+        renderPosts();
+    } else {
+        postsContainer.innerHTML = `<p class="error-msg">Failed to load articles. Posts data is missing.</p>`;
+    }
 
     // Render cards to the DOM grid
     function renderPosts() {

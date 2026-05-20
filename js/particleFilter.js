@@ -101,7 +101,7 @@ class ParticleFilter {
         this.textToTrace = "ZACHARY ZDOBINSKI";
         this.pathPoints = []; // Compiled continuous points for tracking
         this.pathIndex = 0.0; // Current float index on the path
-        this.speed = 0.35;    // Tracking speed along the path (points per frame, slowed down from 1.6)
+        this.speed = 0.20;    // Tracking speed along the path (points per frame, slowed down from 0.35)
         this.isOccluded = false; // Flag to indicate signal occlusion
         
         // Initialize

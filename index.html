@@ -14,7 +14,7 @@
     <!-- CSS stylesheet -->
     <link rel="stylesheet" href="css/styles.css">
 </head>
-<body class="dark-theme">
+<body class="light-theme">
 
     <!-- Header Navigation -->
     <header class="main-header">
@@ -28,7 +28,6 @@
                 <a href="#resume" class="nav-link">Resume</a>
                 <a href="#projects" class="nav-link">Projects</a>
                 <a href="#blog" class="nav-link">Blog</a>
-                <a href="#contact" class="nav-link">Contact</a>
             </nav>
             <div class="nav-actions">
                 <button id="theme-toggle" class="theme-toggle-btn" aria-label="Toggle light/dark theme">
@@ -50,7 +49,6 @@
             <a href="#resume" class="mobile-nav-link">Resume</a>
             <a href="#projects" class="mobile-nav-link">Projects</a>
             <a href="#blog" class="mobile-nav-link">Blog</a>
-            <a href="#contact" class="mobile-nav-link">Contact</a>
         </nav>
     </div>
 
@@ -450,72 +448,7 @@
             </div>
         </div>
 
-        <!-- Contact Section -->
-        <section id="contact" class="section container">
-            <div class="section-header">
-                <span class="subtitle">Get In Touch</span>
-                <h2>Contact &amp; Collaborations</h2>
-                <div class="header-line"></div>
-            </div>
 
-            <div class="contact-layout">
-                <div class="contact-info-panel">
-                    <h3>Let's build something robust.</h3>
-                    <p>
-                        Whether you want to discuss state estimation filters, reinforcement learning rollouts, or safety-critical C++ architectures, feel free to reach out.
-                    </p>
-                    <div class="contact-info-list">
-                        <div class="info-item">
-                            <i data-lucide="mail"></i>
-                            <div>
-                                <span>Email</span>
-                                <a href="mailto:zrz@andrew.cmu.edu">zrz@andrew.cmu.edu</a>
-                            </div>
-                        </div>
-                        <div class="info-item">
-                            <i data-lucide="phone"></i>
-                            <div>
-                                <span>Phone</span>
-                                <a href="tel:+14124235644">(412) 423-5644</a>
-                            </div>
-                        </div>
-                        <div class="info-item">
-                            <i data-lucide="linkedin"></i>
-                            <div>
-                                <span>LinkedIn</span>
-                                <a href="https://linkedin.com" target="_blank" rel="noopener">Zachary Zdobinski</a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <form class="contact-form" id="contact-me-form">
-                    <div class="form-row">
-                        <div class="input-group">
-                            <input type="text" id="contact-name" required placeholder=" ">
-                            <label for="contact-name">Your Name</label>
-                        </div>
-                        <div class="input-group">
-                            <input type="email" id="contact-email" required placeholder=" ">
-                            <label for="contact-email">Email Address</label>
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <input type="text" id="contact-subject" required placeholder=" ">
-                        <label for="contact-subject">Subject</label>
-                    </div>
-                    <div class="input-group">
-                        <textarea id="contact-message" required rows="5" placeholder=" "></textarea>
-                        <label for="contact-message">Your Message</label>
-                    </div>
-                    <button type="submit" class="submit-btn">
-                        <span>Send Message</span>
-                        <i data-lucide="send"></i>
-                    </button>
-                    <div class="form-feedback" id="form-feedback-message"></div>
-                </form>
-            </div>
-        </section>
     </main>
 
     <!-- Footer -->
